@@ -26,8 +26,6 @@ CSRCS = rp2040_boardinitialize.c
 CSRCS += rp2040_appinit.c
 CSRCS += rp2040_bringup.c
 
-CSRCS += sx126x.c
-
 ifeq ($(CONFIG_DEV_GPIO),y)
 CSRCS += rp2040_gpio.c
 endif

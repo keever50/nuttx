@@ -1,0 +1,16 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if LPWAN_SX126X
+
+config LPWAN_SX126X_RFFREQ_DEFAULT
+	int "SX126X default RF frequency"
+	default 868000000
+
+config LPWAN_SX126X_MAX_DEVICES
+	int "SX126X maximum devices"
+	default 1
+
+endif # DRIVERS_LPWAN

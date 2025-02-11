@@ -39,6 +39,7 @@
 #include <sys/endian.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <nuttx/wireless/lpwan/sx126x.h>
 
 /****************************************************************************
  * Private prototypes

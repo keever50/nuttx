@@ -656,21 +656,4 @@ struct sx126x_packetparams_gfsk_s
 #define SX126X_CLEARDEVICEERRORS                0x07
 #define SX126X_CLEARDEVICEERRORS_NOPS           2
 
-/****************************************************************************
- * Public Data Types
- ****************************************************************************/
-
-struct sx126x_lower_s
-{
-    unsigned int port;
-    void (*reset)(void);
-};
-
-/****************************************************************************
- * Public Functions Prototypes
- ****************************************************************************/
-
-void sx126x_register(FAR struct spi_dev_s *spi,
-                     FAR const struct sx126x_lower_s *lower);
-
 #endif /* __DRIVERS_WIRELESS_LPWAN_SX126X_SX126X_H */

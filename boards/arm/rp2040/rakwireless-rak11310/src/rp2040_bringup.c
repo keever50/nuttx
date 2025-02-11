@@ -47,9 +47,8 @@
 #include "rp2040_spi.h"
 #include <arch/board/rp2040_spidev.h>
 #include <nuttx/spi/spi.h>
-#include "sx126x.h"
 #include "rp2040_gpio.h"
-
+#include <nuttx/wireless/lpwan/sx126x.h>
 
 /****************************************************************************
  * Private prototypes
