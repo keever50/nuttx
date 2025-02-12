@@ -62,7 +62,7 @@ void sx_reset(void);
 
 struct sx126x_lower_s sx126x =
 {
-  .port=1,
+  .port=1, //
   .reset=sx_reset
 };
 
@@ -133,7 +133,7 @@ int rp2040_bringup(void)
   struct spi_dev_s *spi;
   spi=rp2040_spibus_initialize(sx126x.port);
 
-  sx126x_register(spi, &sx126x);
+  sx126x_register(spi, &sx126x, "dev/sx1262-0");
 
   return OK;
 }

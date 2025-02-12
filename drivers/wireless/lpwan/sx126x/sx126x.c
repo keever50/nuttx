@@ -66,7 +66,9 @@ struct sx126x_dev_s
   struct spi_dev_s *spi;
   const struct sx126x_lower_s *lower;
   uint8_t times_opened;
-  mutex_t lock;                         /* Only let one user in at a time */
+  mutex_t lock;                           /* Only let one user in at a time */
+  uint8_t payload_len;
+  enum sx126x_packet_type_e packet_type;  /* This will decide what modulation to use */
 };
 
 enum sx126x_cmd_status
@@ -230,6 +232,8 @@ static int sx126x_init(FAR struct sx126x_dev_s *dev);
 
 static int sx126x_deinit(FAR struct sx126x_dev_s *dev);
 
+static int sx126x_setup_tx(FAR struct sx126x_dev_s *dev);
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
@@ -264,8 +268,6 @@ static int sx126x_open(FAR struct file *filep)
 
   /* Initialize */
 
-  sx126x_reset(dev);
-  usleep(1000);
   ret = sx126x_init(dev);
   if (ret != 0)
     {
@@ -277,7 +279,7 @@ static int sx126x_open(FAR struct file *filep)
   dev->times_opened++;
   ret = OK;
 
-exit_err:
+exit_err: 
   nxmutex_unlock(&dev->lock);
   return ret;
 }
@@ -339,12 +341,38 @@ static ssize_t sx126x_write(FAR struct file *filep,
                             FAR const char *buf,
                             size_t buflen)
 {
+  int ret = 0;
+
+  /* Get device */
+
+  struct sx126x_dev_s *dev;
+  dev = filep->f_inode->i_private;
+
   if (buf == NULL || buflen < 1)
     {
       return -EINVAL;
     }
 
-  printf("Trying to write\n");
+  syslog(LOG_DEBUG, "TXing");
+
+  sx126x_spi_lock(dev);
+
+  /* Test echo "HELLO FSDFSDFDSFSDFSFSDFSDFDSFSDFSDFSDFHELLOFDFSDFHELLO" >> dev/sx1262-0 */
+
+  /* Data */
+
+  dev->payload_len = buflen;
+  sx126x_write_buffer(dev, 0, (uint8_t *)buf, buflen);
+
+  /* Pre-TX setup */
+
+  sx126x_setup_tx(dev);
+
+  /* TX */
+
+  sx126x_set_tx(dev, 0);
+
+  sx126x_spi_unlock(dev);
 
   return 1;
 }
@@ -973,6 +1001,8 @@ static void sx126x_set_syncword(FAR struct sx126x_dev_s *dev,
 
 static int sx126x_init(FAR struct sx126x_dev_s *dev)
 {
+  sx126x_reset(dev);
+  //sx126x_set_defaults(dev);
   return 0;
 }
 
@@ -981,12 +1011,84 @@ static int sx126x_deinit(FAR struct sx126x_dev_s *dev)
   return 0;
 }
 
+static int sx126x_setup_tx(FAR struct sx126x_dev_s *dev)
+{
+  /* Regulator */
+
+  sx126x_set_regulator_mode(dev, SX126X_DC_DC_LDO); //
+
+  /* Set packet type */
+
+  sx126x_set_packet_type(dev, SX126X_PACKETTYPE_LORA);
+
+  /* Set RF frequency */
+
+  sx126x_get_rf_frequency(dev, 869525000);
+
+  /* Set PA */
+
+  sx126x_set_pa_config(dev, SX1262, 0x01, 0x01); //
+
+  /* Set TX params */
+
+  sx126x_set_tx_params(dev, 0xef, SX126X_SET_RAMP_200U);
+
+  /* Set base */
+
+  sx126x_set_buffer_base_address(dev, 0, 0xaa);
+
+  /* Set mod params */
+
+  struct sx126x_modparams_lora_s modparams = {
+    .spreading_factor           = SX126X_LORA_SF11,
+    .bandwidth                  = SX126X_LORA_BW_250,
+    .coding_rate                = SX126X_LORA_CR_4_5,
+    .low_datarate_optimization  = true
+  };
+
+  sx126x_set_modulation_params_lora(dev, &modparams);
+
+  /* Packet params */
+
+  struct sx126x_packetparams_lora_s pktparams = {
+    .crc_enable          = false,
+    .fixed_length_header = true,
+    .payload_length      = dev->payload_len,
+    .invert_iq           = false,
+    .preambles           = 12
+  };
+
+  sx126x_set_packet_params_lora(dev, &pktparams);
+
+  /* Sync word */
+
+  uint8_t syncword[] = {
+    0xaa, 0xbb, 0xaa, 0xbb
+  };
+
+  sx126x_set_syncword(dev, syncword, sizeof(syncword));
+
+  /* IRQ MASK */
+
+  sx126x_set_dio_irq_params(dev, SX126X_IRQ_TXDONE_MASK,
+                            SX126X_IRQ_TXDONE_MASK, 0x00, 0x00); //
+
+  /* DIO 2 */
+
+  sx126x_set_dio2_as_rf_switch(dev, true); //
+
+  /* DIO 3 */
+
+  sx126x_set_dio3_as_tcxo(dev, SX126X_TCXO_3_3V, 200); //
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 void sx126x_register(FAR struct spi_dev_s *spi,
-                     FAR const struct sx126x_lower_s *lower)
+                     FAR const struct sx126x_lower_s *lower,
+                     const char *path)
 {
   /* Register the dev using an unique port id,
    * so multiple radios can be registered at once
@@ -1003,7 +1105,7 @@ void sx126x_register(FAR struct spi_dev_s *spi,
 
   g_sx126x_devices[lower->port].lower   = lower;
   g_sx126x_devices[lower->port].spi     = spi;
-
-  (void)register_driver("/dev/sx126x", &sx126x_ops, 0666,
+  nxmutex_init(&g_sx126x_devices[lower->port].lock);
+  (void)register_driver(path, &sx126x_ops, 0666,
                         &g_sx126x_devices[lower->port]);
 }

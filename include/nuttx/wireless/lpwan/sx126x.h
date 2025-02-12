@@ -49,7 +49,8 @@ struct sx126x_lower_s
  * Public Functions Prototypes
  ****************************************************************************/
 
-void sx126x_register(FAR struct spi_dev_s *spi,
-                     FAR const struct sx126x_lower_s *lower);
+ void sx126x_register(FAR struct spi_dev_s *spi,
+                      FAR const struct sx126x_lower_s *lower,
+                      const char* path);
 
  #endif /* __INCLUDE_NUTTX_WIRELESS_LPWAN_SX126X_H */
