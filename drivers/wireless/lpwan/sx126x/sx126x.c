@@ -93,6 +93,7 @@ struct sx126x_dev_s
 
   /* Interrupt handling */
 
+  uint16_t irq_mask;
   struct work_s irq0_work;
 };
 
@@ -197,6 +198,13 @@ static void sx126x_set_dio2_as_rf_switch(FAR struct sx126x_dev_s *dev,
 static void sx126x_set_dio3_as_tcxo(FAR struct sx126x_dev_s *dev,
                                     enum sx126x_tcxo_voltage_e voltage,
                                     uint32_t delay);
+
+static void sx126x_get_irq_status(FAR struct sx126x_dev_s *dev,
+                                  FAR uint16_t *irqstatus);
+
+
+static void sx126x_clear_irq_status(FAR struct sx126x_dev_s *dev,
+                                    uint16_t clearbits);
 
 /* RF Modulation and Packet-Related Functions *******************************/
 
@@ -402,6 +410,7 @@ static ssize_t sx126x_write(FAR struct file *filep,
 
   /* Pre-TX setup */
 
+  dev->irq_mask = SX126X_IRQ_TXDONE_MASK;
   sx126x_setup_radio(dev);
 
   /* TX */
@@ -758,6 +767,38 @@ static void sx126x_set_dio3_as_tcxo(FAR struct sx126x_dev_s *dev,
 
   sx126x_command(dev, SX126X_SETDIO3TCXOCTRL, params,
                  SX126X_SETDIO3TCXOCTRL_PARAMS, NULL);
+}
+
+static void sx126x_get_irq_status(FAR struct sx126x_dev_s *dev,
+                                  FAR uint16_t *irqstatus)
+{
+  uint8_t returns[SX126X_GETIRQSTATUS_RETURNS];
+
+  sx126x_command(dev, SX126X_GETIRQSTATUS,
+                 NULL, SX126X_GETIRQSTATUS_RETURNS,
+                 returns);
+
+  uint16_t bits;
+  memcpy(&bits, returns+
+         SX126X_GETIRQSTATUS_IRQSTATUS_RETURN,
+         SX126X_GETIRQSTATUS_IRQSTATUS_RETURNS);
+
+  *irqstatus = be16toh(bits);
+}
+
+static void sx126x_clear_irq_status(FAR struct sx126x_dev_s *dev,
+                                    uint16_t clearbits)
+{
+  uint8_t params[SX126X_CLEARIRQSTATUS_PARAMS];
+
+  clearbits = htobe16(clearbits);
+  memcpy(params+SX126X_CLEARIRQSTATUS_CLEAR_PARAM,
+         &clearbits,
+         SX126X_CLEARIRQSTATUS_CLEAR_PARAMS);
+  
+  sx126x_command(dev, SX126X_CLEARIRQSTATUS, params,
+                 SX126X_CLEARIRQSTATUS_PARAMS,
+                 NULL);
 }
 
 /* RF Modulation and Packet-Related Functions *******************************/
@@ -1190,7 +1231,7 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
 
   /* IRQ MASK */
 
-  sx126x_set_dio_irq_params(dev, dev->lower->masks.irq_mask,
+  sx126x_set_dio_irq_params(dev, dev->irq_mask,
     dev->lower->masks.dio1_mask,
     dev->lower->masks.dio2_mask,
     dev->lower->masks.dio3_mask);
@@ -1227,7 +1268,21 @@ static inline int sx126x_attachirq0(FAR struct sx126x_dev_s *dev, xcpt_t isr,
 
 static void sx126x_isr0_process(FAR void *arg)
 {
+  DEBUGASSERT(arg);
+
+  FAR struct sx126x_dev_s *dev = (FAR struct sx126x_dev_s *)arg;
+  int err = OK;
+ 
   syslog(LOG_DEBUG, "SX126x ISR0 process triggered");
+  
+  uint16_t irqbits=0;
+  sx126x_spi_lock(dev);
+  sx126x_get_irq_status(dev, &irqbits);
+  sx126x_spi_unlock(dev);
+
+  syslog(LOG_DEBUG, "IRQ status 0x%X", irqbits);
+
+  sx126x_clear_irq_status(dev, 0xFFFF);
 }
 
 /****************************************************************************

@@ -304,10 +304,9 @@ struct sx126x_packetparams_gfsk_s
 
 struct sx126x_irq_masks
 {
-  uint8_t irq_mask;
-  uint8_t dio1_mask;
-  uint8_t dio2_mask;
-  uint8_t dio3_mask;
+  uint16_t dio1_mask;
+  uint16_t dio2_mask;
+  uint16_t dio3_mask;
 };
 
 struct sx126x_lower_s

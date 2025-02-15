@@ -307,6 +307,13 @@
 #define SX126X_GETIRQSTATUS_IRQSTATUS_RETURN    1
 #define SX126X_GETIRQSTATUS_IRQSTATUS_RETURNS   2
 
+/* ClearIrqStatus */
+
+#define SX126X_CLEARIRQSTATUS                   0x02
+#define SX126X_CLEARIRQSTATUS_PARAMS            2
+#define SX126X_CLEARIRQSTATUS_CLEAR_PARAM       0
+#define SX126X_CLEARIRQSTATUS_CLEAR_PARAMS      2
+
 /* RF Modulation and Packet-Related Functions *******************************/
 
 /* SetRfFrequency */
