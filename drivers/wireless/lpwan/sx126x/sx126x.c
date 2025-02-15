@@ -173,6 +173,8 @@ static void sx126x_set_standby(FAR struct sx126x_dev_s *dev,
 static void sx126x_set_tx(FAR struct sx126x_dev_s *dev,
                           uint32_t timeout);
 
+static void sx126x_set_rx(FAR struct sx126x_dev_s *dev, uint32_t timeout);
+
 static void sx126x_set_cad(struct sx126x_dev_s *dev);
 
 static void sx126x_set_tx_continuous_wave(FAR struct sx126x_dev_s *dev);
@@ -204,7 +206,6 @@ static void sx126x_set_dio3_as_tcxo(FAR struct sx126x_dev_s *dev,
 
 static void sx126x_get_irq_status(FAR struct sx126x_dev_s *dev,
                                   FAR uint16_t *irqstatus);
-
 
 static void sx126x_clear_irq_status(FAR struct sx126x_dev_s *dev,
                                     uint16_t clearbits);
@@ -372,14 +373,36 @@ exit_err:
 
 static ssize_t sx126x_read(FAR struct file *filep,
                            FAR char *buf,
-                          size_t buflen)
+                           size_t buflen)
 {
   if (buf == NULL || buflen < 1)
     {
       return -EINVAL;
     }
 
+  /* Get device */
+
+  struct sx126x_dev_s *dev;
+  dev = filep->f_inode->i_private;
+
+  nxmutex_lock(&dev->lock);
+
   printf("Reading\n");
+
+  /* Pre-RX setup */
+
+  sx126x_spi_lock(dev);
+  dev->irq_mask=SX126X_IRQ_RXDONE_MASK | SX126X_IRQ_PREAMBLEDETECTED_MASK;
+  sx126x_setup_radio(dev);
+
+  /* RX mode */
+
+  sx126x_set_rx(dev, SX126X_NO_TIMEOUT);
+  sx126x_spi_unlock(dev);
+
+  /* Exit */
+
+  nxmutex_unlock(&dev->lock);
 
   return 1;
 }
@@ -405,8 +428,6 @@ static ssize_t sx126x_write(FAR struct file *filep,
   syslog(LOG_DEBUG, "TXing");
 
   sx126x_spi_lock(dev);
-
-  /* Test echo "HELLO FSDFSDFDSFSDFSFSDFSDFDSFSDFSDFSDFHELLOFDFSDFHELLO" >> dev/sx1262-0 */
 
   /* Data */
 
@@ -789,7 +810,7 @@ static void sx126x_get_irq_status(FAR struct sx126x_dev_s *dev,
                  returns);
 
   uint16_t bits;
-  memcpy(&bits, returns+
+  memcpy(&bits, returns +
          SX126X_GETIRQSTATUS_IRQSTATUS_RETURN,
          SX126X_GETIRQSTATUS_IRQSTATUS_RETURNS);
 
@@ -802,10 +823,10 @@ static void sx126x_clear_irq_status(FAR struct sx126x_dev_s *dev,
   uint8_t params[SX126X_CLEARIRQSTATUS_PARAMS];
 
   clearbits = htobe16(clearbits);
-  memcpy(params+SX126X_CLEARIRQSTATUS_CLEAR_PARAM,
+  memcpy(params + SX126X_CLEARIRQSTATUS_CLEAR_PARAM,
          &clearbits,
          SX126X_CLEARIRQSTATUS_CLEAR_PARAMS);
-  
+
   sx126x_command(dev, SX126X_CLEARIRQSTATUS, params,
                  SX126X_CLEARIRQSTATUS_PARAMS,
                  NULL);
@@ -1194,7 +1215,7 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
 
   /* Set base */
 
-  sx126x_set_buffer_base_address(dev, 0, 0xaa);
+  sx126x_set_buffer_base_address(dev, 0, 0);
 
   /* Set params depending on packet type */
 
@@ -1234,7 +1255,7 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
   /* Sync word */
 
   uint8_t syncword[] = {
-    0xaa, 0xbb, 0xaa, 0xbb
+    0x34
   };
 
   sx126x_set_syncword(dev, syncword, sizeof(syncword));
@@ -1265,7 +1286,7 @@ static int sx126x_irq0handler(int irq, FAR void *context, FAR void *arg)
 
   DEBUGASSERT(work_available(&dev->irq0_work));
 
-  return work_queue(HPWORK, &dev->irq0_work, sx126x_isr0_process, arg, 0);  
+  return work_queue(HPWORK, &dev->irq0_work, sx126x_isr0_process, arg, 0);
 }
 
 static inline int sx126x_attachirq0(FAR struct sx126x_dev_s *dev, xcpt_t isr,
@@ -1282,15 +1303,15 @@ static void sx126x_isr0_process(FAR void *arg)
 
   FAR struct sx126x_dev_s *dev = (FAR struct sx126x_dev_s *)arg;
   int err = OK;
- 
+
   syslog(LOG_DEBUG, "SX126x ISR0 process triggered");
-  
+
   /* Get and clear IRQ bits */
 
-  uint16_t irqbits=0;
+  uint16_t irqbits = 0;
   sx126x_spi_lock(dev);
-  sx126x_get_irq_status(dev, &irqbits);
-  sx126x_clear_irq_status(dev, 0xFFFF);
+  sx126x_get_irq_status(dev, & irqbits);
+  sx126x_clear_irq_status(dev, 0xffff);
   sx126x_spi_unlock(dev);
 
   syslog(LOG_DEBUG, "IRQ status 0x%X", irqbits);
@@ -1304,6 +1325,29 @@ static void sx126x_isr0_process(FAR void *arg)
       /* Release writing threads */
 
       nxsem_post(&dev->tx_sem);
+    }
+
+  /* On RX done */
+
+  if (irqbits & SX126X_IRQ_RXDONE_MASK)
+    {
+      syslog(LOG_DEBUG, "RX done");
+
+      nxsem_post(&dev->rx_sem);
+    }
+
+  /* On CAD done */
+  
+  if (irqbits & SX126X_IRQ_CADDONE_MASK)
+    {
+      syslog(LOG_DEBUG, "CAD done");
+    }
+
+  /* On CAD detect */
+
+  if (irqbits & SX126X_IRQ_CADDETECTED_MASK)
+    {
+      syslog(LOG_DEBUG, "CAD detect");
     }
 
 }

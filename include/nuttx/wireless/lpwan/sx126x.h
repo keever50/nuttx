@@ -39,6 +39,8 @@
   * Defintions
   ***************************************************************************/
 
+#define SX126X_RX_PAYLOAD_SIZE              0xff
+  
 /* IRQ Register bits ********************************************************/
 
 #define SX126X_IRQ_TXDONE_MASK              (1<<0)
@@ -323,6 +325,16 @@ struct sx126x_lower_s
   /* Interrupt attachments. These should be connected to one of the DIOx pins */
 
   CODE int (*irq0attach)(xcpt_t handler, FAR void *arg);
+};
+
+/* Upper ********************************************************************/
+
+struct sx126x_read_header_s
+{
+  uint8_t payload_length;
+  float snr;
+  int16_t rssi_db;
+  uint8_t payload[SX126X_RX_PAYLOAD_SIZE];
 };
 
 /****************************************************************************

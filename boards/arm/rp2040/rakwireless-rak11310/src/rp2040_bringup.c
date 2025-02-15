@@ -71,7 +71,7 @@ struct sx126x_lower_s sx126x =
   .dev_number=0,
   .reset=sx_reset,
   .masks = {
-    .dio1_mask = SX126X_IRQ_TXDONE_MASK,
+    .dio1_mask = SX126X_IRQ_TXDONE_MASK | SX126X_IRQ_RXDONE_MASK,
     .dio2_mask = 0,
     .dio3_mask = 0
   },
