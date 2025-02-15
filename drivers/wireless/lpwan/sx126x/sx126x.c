@@ -32,6 +32,7 @@
 #include <debug.h>
 #include <errno.h>
 #include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/spi/spi.h>
 #include <nuttx/wireless/ioctl.h>
 #include <sched.h>
@@ -69,6 +70,8 @@ struct sx126x_dev_s
   const struct sx126x_lower_s *lower;
   uint8_t times_opened;
   mutex_t lock;                           /* Only let one user in at a time */
+  sem_t rx_sem;
+  sem_t tx_sem;
 
   /* Hardware settings */
 
@@ -397,6 +400,8 @@ static ssize_t sx126x_write(FAR struct file *filep,
       return -EINVAL;
     }
 
+  nxmutex_lock(&dev->lock);
+
   syslog(LOG_DEBUG, "TXing");
 
   sx126x_spi_lock(dev);
@@ -419,7 +424,12 @@ static ssize_t sx126x_write(FAR struct file *filep,
 
   sx126x_spi_unlock(dev);
 
-  return 1;
+  /* Wait for transmitting operations to be finished */
+
+  ret = nxsem_wait(&dev->tx_sem);  //
+
+  nxmutex_unlock(&dev->lock);
+  return ret;
 }
 
 static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
@@ -1275,14 +1285,27 @@ static void sx126x_isr0_process(FAR void *arg)
  
   syslog(LOG_DEBUG, "SX126x ISR0 process triggered");
   
+  /* Get and clear IRQ bits */
+
   uint16_t irqbits=0;
   sx126x_spi_lock(dev);
   sx126x_get_irq_status(dev, &irqbits);
+  sx126x_clear_irq_status(dev, 0xFFFF);
   sx126x_spi_unlock(dev);
 
   syslog(LOG_DEBUG, "IRQ status 0x%X", irqbits);
 
-  sx126x_clear_irq_status(dev, 0xFFFF);
+  /* On TX done */
+
+  if (irqbits & SX126X_IRQ_TXDONE_MASK)
+    {
+      syslog(LOG_DEBUG, "TX done");
+
+      /* Release writing threads */
+
+      nxsem_post(&dev->tx_sem);
+    }
+
 }
 
 /****************************************************************************
@@ -1311,7 +1334,11 @@ void sx126x_register(FAR struct spi_dev_s *spi,
   dev->lower   = lower;
   dev->spi     = spi;
 
+  /* Initialize locks and semaphores */
+
   nxmutex_init(&dev->lock);
+  nxsem_init(&dev->rx_sem, 0, 0);
+  nxsem_init(&dev->tx_sem, 0, 0);
 
   sx126x_attachirq0(dev, sx126x_irq0handler, dev);
 
