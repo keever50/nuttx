@@ -35,6 +35,12 @@
 
 #include "rp2040_pico.h"
 
+#include "rp2040_spi.h"
+#include <arch/board/rp2040_spidev.h>
+#include <nuttx/spi/spi.h>
+#include "rp2040_gpio.h"
+#include <nuttx/wireless/lpwan/sx126x.h>
+
 #ifdef CONFIG_ARCH_BOARD_COMMON
 #include "rp2040_common_bringup.h"
 #endif /* CONFIG_ARCH_BOARD_COMMON */
@@ -43,17 +49,17 @@
 #  include <nuttx/leds/userled.h>
 #endif
 
-/* Custom driver */
-#include "rp2040_spi.h"
-#include <arch/board/rp2040_spidev.h>
-#include <nuttx/spi/spi.h>
-#include "rp2040_gpio.h"
-#include <nuttx/wireless/lpwan/sx126x.h>
+/****************************************************************************
+ * Definitions
+ ****************************************************************************/
+
+#define RAK11310_DIO1_PIN 29
 
 /****************************************************************************
  * Private prototypes
  ****************************************************************************/
 
+static int sx126x_irq0_attach(xcpt_t isr, void *arg); 
 void sx_reset(void);
 
 /****************************************************************************
@@ -62,14 +68,37 @@ void sx_reset(void);
 
 struct sx126x_lower_s sx126x =
 {
-  .port=1, //
-  .reset=sx_reset
+  .dev_number=0,
+  .reset=sx_reset,
+  .masks = {
+    .irq_mask = SX126X_IRQ_TXDONE_MASK,
+    .dio1_mask = SX126X_IRQ_TXDONE_MASK,
+    .dio2_mask = 0,
+    .dio3_mask = 0
+  },
+  .irq0attach = sx126x_irq0_attach
 };
-
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+static int sx126x_irq0_attach(xcpt_t isr, void *arg)
+{
+  int err=0;
+  rp2040_gpio_init(RAK11310_DIO1_PIN);
+  rp2040_gpio_set_pulls(RAK11310_DIO1_PIN, false, true);
+  err = rp2040_gpio_irq_attach(RAK11310_DIO1_PIN,
+                                RP2040_GPIO_INTR_EDGE_HIGH,
+                                isr, arg);
+  if(err < 0)
+    {
+      return err;
+    }
+
+  rp2040_gpio_enable_irq(RAK11310_DIO1_PIN);
+  return err;
+}
 
 void sx_reset(void)
 {
@@ -131,7 +160,7 @@ int rp2040_bringup(void)
 
 
   struct spi_dev_s *spi;
-  spi=rp2040_spibus_initialize(sx126x.port);
+  spi=rp2040_spibus_initialize(1);
 
   sx126x_register(spi, &sx126x, "dev/sx1262-0");
 
