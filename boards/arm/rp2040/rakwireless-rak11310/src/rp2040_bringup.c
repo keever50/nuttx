@@ -1,5 +1,5 @@
 /****************************************************************************
- * boards/arm/rp2040/raspberrypi-pico/src/rp2040_bringup.c
+ * boards/arm/rp2040/rakwireless-rak11310/src/rp2040_bringup.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -59,7 +59,7 @@
  * Private prototypes
  ****************************************************************************/
 
-static int sx126x_irq0_attach(xcpt_t isr, void *arg); 
+static int sx126x_irq0_attach(xcpt_t isr, void *arg);
 void sx_reset(void);
 
 /****************************************************************************
@@ -68,9 +68,10 @@ void sx_reset(void);
 
 struct sx126x_lower_s sx126x =
 {
-  .dev_number=0,
-  .reset=sx_reset,
-  .masks = {
+  .dev_number = 0,
+  .reset = sx_reset,
+  .masks =
+  {
     .dio1_mask = SX126X_IRQ_TXDONE_MASK | SX126X_IRQ_RXDONE_MASK,
     .dio2_mask = 0,
     .dio3_mask = 0
@@ -84,13 +85,13 @@ struct sx126x_lower_s sx126x =
 
 static int sx126x_irq0_attach(xcpt_t isr, void *arg)
 {
-  int err=0;
+  int err = 0;
   rp2040_gpio_init(RAK11310_DIO1_PIN);
   rp2040_gpio_set_pulls(RAK11310_DIO1_PIN, false, true);
   err = rp2040_gpio_irq_attach(RAK11310_DIO1_PIN,
                                 RP2040_GPIO_INTR_EDGE_HIGH,
                                 isr, arg);
-  if(err < 0)
+  if (err < 0)
     {
       return err;
     }
@@ -104,7 +105,7 @@ void sx_reset(void)
   rp2040_gpio_put(14, false);
   usleep(100);
   rp2040_gpio_put(14, true);
-  usleep(100);  
+  usleep(100);
 }
 
 /****************************************************************************
@@ -149,7 +150,7 @@ int rp2040_bringup(void)
       syslog(LOG_ERR, "ERROR: btn_lower_initialize() failed: %d\n", ret);
     }
 #endif
-  
+
   rp2040_gpio_init(25);
   rp2040_gpio_setdir(25, true);
   rp2040_gpio_put(25, false);
@@ -157,9 +158,8 @@ int rp2040_bringup(void)
   rp2040_gpio_init(14);
   rp2040_gpio_setdir(14, true);
 
-
   struct spi_dev_s *spi;
-  spi=rp2040_spibus_initialize(1);
+  spi = rp2040_spibus_initialize(1);
 
   sx126x_register(spi, &sx126x, "dev/sx1262-0");
 

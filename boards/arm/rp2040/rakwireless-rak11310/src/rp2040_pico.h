@@ -1,5 +1,5 @@
 /****************************************************************************
- * boards/arm/rp2040/raspberrypi-pico/src/rp2040_pico.h
+ * boards/arm/rp2040/rakwireless-rak11310/src/rp2040_pico.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -20,8 +20,8 @@
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_RP2040_RASPBERRYPI_PICO_SRC_RP2040_PICO_H
-#define __BOARDS_ARM_RP2040_RASPBERRYPI_PICO_SRC_RP2040_PICO_H
+#ifndef __BOARDS_ARM_RP2040_RAKWIRELESS_RAK11310_SRC_RP2040_PICO_H
+#define __BOARDS_ARM_RP2040_RAKWIRELESS_RAK11310_SRC_RP2040_PICO_H
 
 /****************************************************************************
  * Included Files
@@ -52,4 +52,4 @@ int rp2040_bringup(void);
 int rp2040_dev_gpio_init(void);
 #endif
 
-#endif /* __BOARDS_ARM_RP2040_RASPBERRYPI_PICO_SRC_RP2040_PICO_H */
+#endif /* __BOARDS_ARM_RP2040_RAKWIRELESS_RAK11310_SRC_RP2040_PICO_H */

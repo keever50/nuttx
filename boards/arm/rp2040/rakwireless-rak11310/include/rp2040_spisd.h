@@ -1,5 +1,5 @@
 /****************************************************************************
- * boards/arm/rp2040/raspberrypi-pico/include/rp2040_spisd.h
+ * boards/arm/rp2040/rakwireless-rak11310/include/rp2040_spisd.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -20,8 +20,8 @@
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_RP2040_RASPBERRYPI_PICO_INCLUDE_RP2040_SPISD_H
-#define __BOARDS_ARM_RP2040_RASPBERRYPI_PICO_INCLUDE_RP2040_SPISD_H
+#ifndef __BOARDS_ARM_RP2040_RAKWIRELESS_RAK11310_INCLUDE_RP2040_SPISD_H
+#define __BOARDS_ARM_RP2040_RAKWIRELESS_RAK11310_INCLUDE_RP2040_SPISD_H
 
 /****************************************************************************
  * Included Files
@@ -82,4 +82,4 @@ uint8_t board_spisd_status(struct spi_dev_s *dev, uint32_t devid);
 #endif
 
 #endif /* __ASSEMBLY__ */
-#endif /* __BOARDS_ARM_RP2040_RASPBERRYPI_PICO_INCLUDE_RP2040_SPISD_H */
+#endif /* __BOARDS_ARM_RP2040_RAKWIRELESS_RAK11310_INCLUDE_RP2040_SPISD_H */

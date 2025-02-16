@@ -1,5 +1,5 @@
 /****************************************************************************
- * boards/arm/rp2040/raspberrypi-pico/include/rp2040_spidev.h
+ * boards/arm/rp2040/rakwireless-rak11310/include/rp2040_spidev.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -20,8 +20,8 @@
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_ARM_RP2040_RASPBERRYPI_PICO_INCLUDE_RP2040_SPIDEV_H
-#define __BOARDS_ARM_RP2040_RASPBERRYPI_PICO_INCLUDE_RP2040_SPIDEV_H
+#ifndef __BOARDS_ARM_RP2040_RAKWIRELESS_RAK11310_INCLUDE_RP2040_SPIDEV_H
+#define __BOARDS_ARM_RP2040_RAKWIRELESS_RAK11310_INCLUDE_RP2040_SPIDEV_H
 
 /****************************************************************************
  * Included Files
@@ -68,4 +68,4 @@ int board_spidev_initialize(int bus);
 #endif
 
 #endif /* __ASSEMBLY__ */
-#endif /* __BOARDS_ARM_RP2040_RASPBERRYPI_PICO_INCLUDE_RP2040_SPIDEV_H */
+#endif /* __BOARDS_ARM_RP2040_RAKWIRELESS_RAK11310_INCLUDE_RP2040_SPIDEV_H */

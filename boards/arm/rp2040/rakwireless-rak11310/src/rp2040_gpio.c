@@ -1,5 +1,5 @@
 /****************************************************************************
- * boards/arm/rp2040/raspberrypi-pico/src/rp2040_gpio.c
+ * boards/arm/rp2040/rakwireless-rak11310/src/rp2040_gpio.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
