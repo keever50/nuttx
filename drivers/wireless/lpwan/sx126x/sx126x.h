@@ -411,6 +411,14 @@
 #define SX126X_GETRSSIINST_STAT_RETURN   0
 #define SX126X_GETRSSIINST_RSSI_RETURN   1
 
+/* GetRxBufferStatus */
+
+#define SX126X_GETRXBUFFERSTATUS                      0x13
+#define SX126X_GETRXBUFFERSTATUS_RETURNS              3
+#define SX126X_GETRXBUFFERSTATUS_STATUS_RETURN        0
+#define SX126X_GETRXBUFFERSTATUS_PAYLOAD_LEN_RETURN   1
+#define SX126X_GETRXBUFFERSTATUS_RX_START_PTR_RETURN  2
+
 /* Misc *********************************************************************/
 
 /* GetDeviceErrors */

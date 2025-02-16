@@ -240,6 +240,11 @@ static void sx126x_get_rf_frequency(FAR struct sx126x_dev_s *dev,
 static void sx126x_get_rssi_inst(FAR struct sx126x_dev_s *dev,
                                  FAR float *dbm);
 
+static void sx126x_get_rx_buffer_status(FAR struct sx126x_dev_s *dev,
+                                        uint8_t *status,
+                                        uint8_t *payload_len,
+                                        uint8_t *rx_buff_offset);
+
 /* Registers and buffer *****************************************************/
 
 static void sx126x_write_register(FAR struct sx126x_dev_s *dev,
@@ -389,15 +394,37 @@ static ssize_t sx126x_read(FAR struct file *filep,
 
   printf("Reading\n");
 
+  /* Get header */
+
+  struct sx126x_read_header_s *header = (struct sx126x_read_header_s *)buf;
+
   /* Pre-RX setup */
 
   sx126x_spi_lock(dev);
-  dev->irq_mask=SX126X_IRQ_RXDONE_MASK | SX126X_IRQ_PREAMBLEDETECTED_MASK;
+  dev->irq_mask=SX126X_IRQ_RXDONE_MASK;
   sx126x_setup_radio(dev);
 
   /* RX mode */
 
   sx126x_set_rx(dev, SX126X_NO_TIMEOUT);
+  sx126x_spi_unlock(dev);
+
+  /* Wait for a packet */
+
+  nxsem_wait(&dev->rx_sem);
+
+  // Check for CRC
+  /* Get payload*/
+
+  uint8_t status;
+  uint8_t offset;
+
+  sx126x_spi_lock(dev);
+  sx126x_get_rx_buffer_status(dev, &status,
+                              &header->payload_length,
+                              &offset);
+  sx126x_read_buffer(dev, offset, header->payload,
+                     header->payload_length);
   sx126x_spi_unlock(dev);
 
   /* Exit */
@@ -447,7 +474,7 @@ static ssize_t sx126x_write(FAR struct file *filep,
 
   /* Wait for transmitting operations to be finished */
 
-  ret = nxsem_wait(&dev->tx_sem);  //
+  ret = nxsem_wait(&dev->tx_sem);
 
   nxmutex_unlock(&dev->lock);
   return ret;
@@ -968,6 +995,23 @@ static void sx126x_get_rssi_inst(FAR struct sx126x_dev_s *dev,
 
   float rssi = rets[SX126X_GETRSSIINST_RSSI_RETURN];
   (*dbm) = -rssi / 2.0;
+}
+
+static void sx126x_get_rx_buffer_status(FAR struct sx126x_dev_s *dev,
+  uint8_t *status,
+  uint8_t *payload_len,
+  uint8_t *rx_buff_offset)
+{
+  uint8_t returns[SX126X_GETRXBUFFERSTATUS_RETURNS];
+
+  sx126x_command(dev, SX126X_GETRXBUFFERSTATUS,
+  NULL,
+  SX126X_GETRXBUFFERSTATUS_RETURNS,
+  returns);
+
+  *status = returns[SX126X_GETRXBUFFERSTATUS_STATUS_RETURN];
+  *payload_len = returns[SX126X_GETRXBUFFERSTATUS_PAYLOAD_LEN_RETURN];
+  *rx_buff_offset = returns[SX126X_GETRXBUFFERSTATUS_RX_START_PTR_RETURN];
 }
 
 /* Lower hardware control ***************************************************/
