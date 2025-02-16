@@ -1966,6 +1966,16 @@ config ARCH_BOARD_ADAFRUIT_QT_PY_RP2040
 		This is a port to the Adafruit QT Py RP2040 board.
 		Support is derived from Raspberry Pi Pico support.
 
+config ARCH_BOARD_RAKWIRELESS_RAK11310
+	bool "Rakwireless RAK11310 module"
+	depends on ARCH_CHIP_RP2040
+	select ARCH_HAVE_LEDS
+	select ARCH_HAVE_BUTTONS
+	select ARCH_HAVE_IRQBUTTONS
+	---help---
+		This is a port to the rakwireless RAK11310 module.
+		Support is derived from Raspberry Pi Pico support.
+
 config ARCH_BOARD_RASPBERRYPI_PICO_2
 	bool "Raspberry Pi Pico 2 board (not Pico, not W)"
 	depends on ARCH_CHIP_RP23XX
@@ -3496,6 +3506,7 @@ config ARCH_BOARD
 	default "adafruit-kb2040"           if ARCH_BOARD_ADAFRUIT_KB2040
 	default "adafruit-qt-py-rp2040"     if ARCH_BOARD_ADAFRUIT_QT_PY_RP2040
 	default "waveshare-rp2040-lcd-1.28" if ARCH_BOARD_WAVESHARE_RP2040_LCD_1_28
+  default "rakwireless-rak11310"      if ARCH_BOARD_RAKWIRELESS_RAK11310
 	default "raspberrypi-pico-2"        if ARCH_BOARD_RASPBERRYPI_PICO_2
 	default "pimoroni-pico-2-plus"      if ARCH_BOARD_PIMORONI_PICO_2_PLUS
 	default "w5500-evb-pico"            if ARCH_BOARD_W5500_EVB_PICO
@@ -3970,6 +3981,9 @@ source "boards/arm/rp2040/adafruit-qt-py-rp2040/Kconfig"
 endif
 if ARCH_BOARD_WAVESHARE_RP2040_ZERO
 source "boards/arm/rp2040/waveshare-rp2040-zero/Kconfig"
+endif
+if ARCH_BOARD_RAKWIRELESS_RAK11310
+source "boards/arm/rp2040/rakwireless-rak11310/Kconfig"
 endif
 if ARCH_BOARD_RASPBERRYPI_PICO_2
 source "boards/arm/rp23xx/raspberrypi-pico-2/Kconfig"
