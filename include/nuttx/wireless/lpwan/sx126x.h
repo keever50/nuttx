@@ -1,5 +1,5 @@
 /****************************************************************************
- * include/nuttx/wireless/lpwan/sx127x.h
+ * include/nuttx/wireless/lpwan/sx126x.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -34,13 +34,23 @@
 
 #include <stdint.h>
 #include <stdbool.h>
- 
- /***************************************************************************
-  * Defintions
-  ***************************************************************************/
+
+/****************************************************************************
+ * Defintions
+ ****************************************************************************/
 
 #define SX126X_RX_PAYLOAD_SIZE              0xff
-  
+
+/* IOCTL commands ***********************************************************/
+
+/* arg: sx126x_packet_type_e */
+
+#define SX126XIOC_PACKETTYPESET             _WLCIOC(SX126X_FIRST+0)//
+
+/* Sets lora parameters. arg: sx126x_lora_config_s *config */
+
+#define SX126XIOC_LORACONFIGSET             _WLCIOC(SX126X_FIRST+1)
+
 /* IRQ Register bits ********************************************************/
 
 #define SX126X_IRQ_TXDONE_MASK              (1<<0)
@@ -302,6 +312,14 @@ struct sx126x_packetparams_gfsk_s
   bool whitening_enable;
 };
 
+/* Config */
+
+struct sx126x_lora_config_s
+{
+  struct sx126x_modparams_lora_s modulation;
+  struct sx126x_packetparams_lora_s packet;
+};
+
 /* Lower driver *************************************************************/
 
 struct sx126x_irq_masks
@@ -314,15 +332,17 @@ struct sx126x_irq_masks
 struct sx126x_lower_s
 {
   /* Index of radio to register.
-    * ex: 0 is the primary radio, 1 is the secondary.
-    * Must be within the maximum configured radios.
-    */
+   * ex: 0 is the primary radio, 1 is the secondary.
+   * Must be within the maximum configured radios.
+   */
 
   unsigned int dev_number;
   CODE void (*reset)(void);
   struct sx126x_irq_masks masks;
 
-  /* Interrupt attachments. These should be connected to one of the DIOx pins */
+  /* Interrupt attachments. These should be
+   * connected to one of the DIOx pins
+   */
 
   CODE int (*irq0attach)(xcpt_t handler, FAR void *arg);
 };
@@ -343,6 +363,6 @@ struct sx126x_read_header_s
 
 void sx126x_register(FAR struct spi_dev_s *spi,
                      FAR const struct sx126x_lower_s *lower,
-                     const char* path);
+                     const char *path);
 
 #endif /* __INCLUDE_NUTTX_WIRELESS_LPWAN_SX126X_H */

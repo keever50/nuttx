@@ -401,7 +401,7 @@ static ssize_t sx126x_read(FAR struct file *filep,
   /* Pre-RX setup */
 
   sx126x_spi_lock(dev);
-  dev->irq_mask=SX126X_IRQ_RXDONE_MASK;
+  dev->irq_mask = SX126X_IRQ_RXDONE_MASK;
   sx126x_setup_radio(dev);
 
   /* RX mode */
@@ -413,8 +413,9 @@ static ssize_t sx126x_read(FAR struct file *filep,
 
   nxsem_wait(&dev->rx_sem);
 
-  // Check for CRC
-  /* Get payload*/
+  /* TODO: check CRC */
+
+  /* Get payload */
 
   uint8_t status;
   uint8_t offset;
@@ -548,6 +549,36 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
           *ptr = dev->power;
           break;
         }
+
+      /* Driver specific IOCTL */
+
+      /* Lora config */
+
+      case SX126XIOC_LORACONFIGSET:
+        {
+          FAR struct sx126x_lora_config_s *ptr =
+            (FAR struct sx126x_lora_config_s *)((uintptr_t)arg);
+          DEBUGASSERT(ptr != NULL);
+
+          /* Modulation params */
+
+          dev->lora_sf = ptr->modulation.spreading_factor;
+          dev->lora_bw = ptr->modulation.bandwidth;
+          dev->lora_cr = ptr->modulation.coding_rate;
+          dev->low_datarate_optimization =
+            ptr->modulation.low_datarate_optimization;
+
+          /* Packet params */
+
+          dev->lora_crc = ptr->packet.crc_enable;
+          dev->lora_fixed_header =
+            ptr->packet.fixed_length_header;
+          dev->payload_len = ptr->packet.payload_length;
+          dev->invert_iq = ptr->packet.invert_iq;
+          dev->preambles = ptr->packet.preambles;
+
+          break;
+        }
     }
 
   /* Success */
@@ -603,7 +634,7 @@ static void sx126x_test(FAR struct sx126x_dev_s *dev)
 
   /* Set TX params */
 
-  sx126x_set_tx_params(dev, 0xef, SX126X_SET_RAMP_200U);
+  sx126x_set_tx_params(dev, 0xef, SX126X_SET_RAMP_20U);
 
   /* Set base */
 
@@ -1239,7 +1270,9 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
 {
   /* Regulator */
 
-  sx126x_set_regulator_mode(dev, SX126X_DC_DC_LDO); //
+  /* TODO: This is a board decision */
+
+  sx126x_set_regulator_mode(dev, SX126X_DC_DC_LDO);
 
   /* Set packet type */
 
@@ -1251,11 +1284,15 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
 
   /* Set PA */
 
-  sx126x_set_pa_config(dev, SX1262, 0x01, 0x01); //
+  /* TODO: This is a board decision */
+
+  sx126x_set_pa_config(dev, SX1262, 0x01, 0x01);
 
   /* Set TX params */
 
-  sx126x_set_tx_params(dev, dev->power, SX126X_SET_RAMP_200U); //
+  /* TODO: This is a board decision */
+
+  sx126x_set_tx_params(dev, dev->power, SX126X_SET_RAMP_200U);
 
   /* Set base */
 
@@ -1313,11 +1350,15 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
 
   /* DIO 2 */
 
-  sx126x_set_dio2_as_rf_switch(dev, true); //
+  /* TODO: This is a board decision */
+
+  sx126x_set_dio2_as_rf_switch(dev, true);
 
   /* DIO 3 */
 
-  sx126x_set_dio3_as_tcxo(dev, SX126X_TCXO_3_3V, 200); //
+  /* TODO: This is a board decision */
+
+  sx126x_set_dio3_as_tcxo(dev, SX126X_TCXO_3_3V, 200);
 }
 
 /* Interrupt handling *******************************************************/
@@ -1381,7 +1422,7 @@ static void sx126x_isr0_process(FAR void *arg)
     }
 
   /* On CAD done */
-  
+
   if (irqbits & SX126X_IRQ_CADDONE_MASK)
     {
       syslog(LOG_DEBUG, "CAD done");
@@ -1393,7 +1434,6 @@ static void sx126x_isr0_process(FAR void *arg)
     {
       syslog(LOG_DEBUG, "CAD detect");
     }
-
 }
 
 /****************************************************************************
