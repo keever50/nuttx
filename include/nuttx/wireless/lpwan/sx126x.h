@@ -338,13 +338,44 @@ struct sx126x_lower_s
 
   unsigned int dev_number;
   CODE void (*reset)(void);
+
+  /* This controls which DIO reacts to interrupts
+   * Depended on the pinout of the board / module.
+   * Note that DIO 2 and DIO 3 can be already in use
+   * by the module and setting them might intefere
+   * with the operation or even damage them.*/
+
   struct sx126x_irq_masks masks;
+  enum sx126x_tcxo_voltage_e dio3_voltage;
+  uint32_t dio3_delay;
+  uint8_t use_dio2_as_rf_sw;
 
   /* Interrupt attachments. These should be
    * connected to one of the DIOx pins
    */
 
   CODE int (*irq0attach)(xcpt_t handler, FAR void *arg);
+
+  /* The regulator mode is board / module depended */
+
+  enum sx126x_regulator_mode_e regulator_mode;
+
+  /* Power amplifier control. DO NOT exceeds the limits listed in SX1261-2 V2 datasheet.
+   * 13.1.14 SetPaConfig
+   * This can cause damage to the device.
+   */
+
+  CODE int (*get_pa_values)(enum sx126x_device_e *model, uint8_t *hpmax, uint8_t *padutycycle);
+
+  /* TX power control. Depending on the local RF regulations, power might have to be limited.
+   * Also depending on board or module, power values have different charactersitics.
+   * More info in sx1261-2 V2 datasheet 13.4.4 SetTxParams.
+   * uint8_t *power is set and this function may limit it.
+   */
+
+  CODE int (*limit_tx_power)(uint8_t *current_power);
+
+  enum sx126x_ramp_time_e tx_ramp_time;
 };
 
 /* Upper ********************************************************************/
@@ -352,9 +383,10 @@ struct sx126x_lower_s
 struct sx126x_read_header_s
 {
   uint8_t payload_length;
-  float snr;
+  int32_t snr;
   int16_t rssi_db;
   uint8_t payload[SX126X_RX_PAYLOAD_SIZE];
+  uint8_t crc_error;
 };
 
 /****************************************************************************

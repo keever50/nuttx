@@ -61,6 +61,8 @@
 
 static int sx126x_irq0_attach(xcpt_t isr, void *arg);
 void sx_reset(void);
+int sx_get_pa(enum sx126x_device_e *model, uint8_t *hpmax, uint8_t *padutycycle);
+int sx_limit_tx(uint8_t *power);
 
 /****************************************************************************
  * Private data
@@ -76,12 +78,31 @@ struct sx126x_lower_s sx126x =
     .dio2_mask = 0,
     .dio3_mask = 0
   },
-  .irq0attach = sx126x_irq0_attach
+  .irq0attach = sx126x_irq0_attach,
+  .dio3_delay = 100,
+  .dio3_voltage = SX126X_TCXO_3_3V,
+  .regulator_mode = SX126X_DC_DC_LDO,
+  .tx_ramp_time = SX126X_SET_RAMP_200U,
+  .limit_tx_power = sx_limit_tx,
+  .get_pa_values = sx_get_pa
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+int sx_get_pa(enum sx126x_device_e *model, uint8_t *hpmax, uint8_t *padutycycle)
+{
+  *model = SX1262;
+  *hpmax = 0x1;
+  *padutycycle = 0x1;
+  return OK;
+}
+
+int sx_limit_tx(uint8_t *power)
+{
+  return OK;
+}
 
 static int sx126x_irq0_attach(xcpt_t isr, void *arg)
 {

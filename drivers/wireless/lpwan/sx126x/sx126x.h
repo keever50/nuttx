@@ -65,6 +65,7 @@
 #define SX126X_DEFAULT_FREQ               869525000
 #define SX126X_DEFAULT_POWER              0x0e
 #define SX126X_DEFAULT_PACKET_TYPE        SX126X_PACKETTYPE_LORA
+#define SX126X_DEFAULT_SYNCWORD           {0x32, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 
 /* Hardware defaults */
 
