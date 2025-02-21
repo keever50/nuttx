@@ -93,9 +93,9 @@ struct sx126x_lower_s sx126x =
 
 int sx_get_pa(enum sx126x_device_e *model, uint8_t *hpmax, uint8_t *padutycycle)
 {
-  *model = SX1262;
-  *hpmax = 0x1;
-  *padutycycle = 0x1;
+  (*model) = SX1262;
+  (*hpmax) = 0x07;
+  (*padutycycle) = 0x04;
   return OK;
 }
 
