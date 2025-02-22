@@ -63,6 +63,7 @@ static int sx126x_irq0_attach(xcpt_t isr, void *arg);
 void sx_reset(void);
 int sx_get_pa(enum sx126x_device_e *model, uint8_t *hpmax, uint8_t *padutycycle);
 int sx_limit_tx(uint8_t *power);
+int sx_check_freq(uint32_t freq);
 
 /****************************************************************************
  * Private data
@@ -84,12 +85,28 @@ struct sx126x_lower_s sx126x =
   .regulator_mode = SX126X_DC_DC_LDO,
   .tx_ramp_time = SX126X_SET_RAMP_200U,
   .limit_tx_power = sx_limit_tx,
-  .get_pa_values = sx_get_pa
+  .get_pa_values = sx_get_pa,
+  .check_frequency = sx_check_freq
 };
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+int sx_check_freq(uint32_t freq)
+{
+  /* TODO: frequency band check */
+
+  if (freq < 860000000)
+    {
+      return -1;
+    }
+  else if (freq > 870000000)
+    {
+      return -1;
+    }
+  return 0;
+}
 
 int sx_get_pa(enum sx126x_device_e *model, uint8_t *hpmax, uint8_t *padutycycle)
 {

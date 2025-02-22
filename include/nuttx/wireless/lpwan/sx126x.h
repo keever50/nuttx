@@ -376,6 +376,15 @@ struct sx126x_lower_s
   CODE int (*limit_tx_power)(uint8_t *current_power);
 
   enum sx126x_ramp_time_e tx_ramp_time;
+
+  /* Frequency control 
+   * Typically boards have a limited range of frequencies.
+   * Exceeding these can damage the radio.
+   * Also depending on regulations, some frequencies are restricted.
+   * This must return non zero in case a frequency is denied.
+   */
+
+   CODE int (*check_frequency)(uint32_t frequency);
 };
 
 /* Upper ********************************************************************/

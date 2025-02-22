@@ -235,7 +235,7 @@ static void sx126x_set_tx_params(FAR struct sx126x_dev_s *dev, uint8_t power,
 static void sx126x_set_packet_type(FAR struct sx126x_dev_s *dev,
                                    enum sx126x_packet_type_e type);
 
-static void sx126x_get_rf_frequency(FAR struct sx126x_dev_s *dev,
+static void sx126x_set_rf_frequency(FAR struct sx126x_dev_s *dev,
                                     uint32_t frequency_hz);
 
 /* Communication status information *****************************************/
@@ -383,6 +383,7 @@ static ssize_t sx126x_read(FAR struct file *filep,
                            FAR char *buf,
                            size_t buflen)
 {
+  int ret = 0;
   if (buf == NULL || buflen < 1)
     {
       return -EINVAL;
@@ -405,7 +406,11 @@ static ssize_t sx126x_read(FAR struct file *filep,
 
   sx126x_spi_lock(dev);
   dev->irq_mask = SX126X_IRQ_RXDONE_MASK | SX126X_IRQ_CRCERR_MASK;
-  sx126x_setup_radio(dev);
+  ret = sx126x_setup_radio(dev);
+  if (ret != 0)
+    {
+      goto sx126x_rx_abort;
+    }
 
   /* RX mode */
 
@@ -435,6 +440,8 @@ static ssize_t sx126x_read(FAR struct file *filep,
 
   /* Exit */
 
+  sx126x_rx_abort:
+
   nxmutex_unlock(&dev->lock);
 
   return 1;
@@ -457,9 +464,6 @@ static ssize_t sx126x_write(FAR struct file *filep,
     }
 
   nxmutex_lock(&dev->lock);
-
-  wlinfo("TXing");
-
   sx126x_spi_lock(dev);
 
   /* Data */
@@ -470,7 +474,12 @@ static ssize_t sx126x_write(FAR struct file *filep,
   /* Pre-TX setup */
 
   dev->irq_mask = SX126X_IRQ_TXDONE_MASK;
-  sx126x_setup_radio(dev);
+  ret = sx126x_setup_radio(dev);
+  if (ret != 0)
+    {
+      sx126x_spi_unlock(dev);
+      goto sx126x_tx_abort;
+    }
 
   /* TX */
 
@@ -480,7 +489,10 @@ static ssize_t sx126x_write(FAR struct file *filep,
 
   /* Wait for transmitting operations to be finished */
 
+  wlinfo("TXing");
   ret = nxsem_wait(&dev->tx_sem);
+
+  sx126x_tx_abort:
 
   nxmutex_unlock(&dev->lock);
   return ret;
@@ -887,7 +899,7 @@ static void sx126x_set_packet_type(FAR struct sx126x_dev_s *dev,
                  SX126X_SETPACKETTYPE_PARAMS, NULL);
 }
 
-static void sx126x_get_rf_frequency(FAR struct sx126x_dev_s *dev,
+static void sx126x_set_rf_frequency(FAR struct sx126x_dev_s *dev,
                                     uint32_t frequency_hz)
 {
   uint32_t corrected_freq =
@@ -1201,7 +1213,15 @@ static int sx126x_setup_radio(FAR struct sx126x_dev_s *dev)
 
   /* Set RF frequency */
 
-  sx126x_get_rf_frequency(dev, dev->frequency_hz);
+  int illegal_freq = dev->lower->check_frequency(dev->frequency_hz);
+
+  if (illegal_freq)
+    {
+      wlerr("Board does not support %dHz", dev->frequency_hz);
+      return -1;
+    }
+
+  sx126x_set_rf_frequency(dev, dev->frequency_hz);
 
   /* Set PA settings from lower */
 
