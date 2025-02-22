@@ -33,6 +33,8 @@
 
 #include "arm_internal.h"
 #include "rp2040_gpio.h"
+#include <nuttx/spi/spi.h>
+#include "hardware/rp2040_spi.h"
 
 #ifdef CONFIG_ARCH_BOARD_COMMON
 #include "rp2040_common_initialize.h"
@@ -80,4 +82,21 @@ void rp2040_boardinitialize(void)
   #endif
 
   /* --- Place any board specific initialization here --- */
+}
+
+void rp2040_spi0select(struct spi_dev_s *dev, uint32_t devid,
+  bool selected)
+{
+  syslog(LOG_INFO, "CS OVERRIDEN!!!\n");
+
+  rp2040_gpio_put(CONFIG_RP2040_SPI0_CS_GPIO, !selected);
+}
+
+int rp2040_spi0cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd)
+{
+  syslog(LOG_INFO, "CMD OVERRIDEN!!!\n");
+
+  rp2040_gpio_put(8, !cmd);
+
+  return OK;
 }

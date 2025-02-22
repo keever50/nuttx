@@ -70,7 +70,7 @@
  ****************************************************************************/
 
 #ifdef CONFIG_RP2040_SPI0
-void rp2040_spi0select(struct spi_dev_s *dev, uint32_t devid,
+void weak_function rp2040_spi0select(struct spi_dev_s *dev, uint32_t devid,
                        bool selected)
 {
   spiinfo("devid: %d CS: %s\n", (int)devid,
@@ -90,7 +90,7 @@ uint8_t rp2040_spi0status(struct spi_dev_s *dev, uint32_t devid)
 }
 
 #ifdef CONFIG_SPI_CMDDATA
-int rp2040_spi0cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd)
+int weak_function rp2040_spi0cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd)
 {
 #ifdef CONFIG_LCD_ST7789
   if (devid == SPIDEV_DISPLAY(0))
@@ -103,10 +103,6 @@ int rp2040_spi0cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd)
 
       return OK;
     }
-#endif
-
-#ifdef CONFIG_LCD_ST7567
-  rp2040_gpio_put(8, !cmd);
 #endif
 
   return -ENODEV;
