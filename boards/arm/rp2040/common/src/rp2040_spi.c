@@ -105,6 +105,10 @@ int rp2040_spi0cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd)
     }
 #endif
 
+#ifdef CONFIG_LCD_ST7567
+  rp2040_gpio_put(8, !cmd);
+#endif
+
   return -ENODEV;
 }
 #endif
