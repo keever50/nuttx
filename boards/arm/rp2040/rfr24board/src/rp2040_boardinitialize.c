@@ -44,6 +44,9 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+#define RFR_AUDIO_MUTE_PIN    17
+#define RFR_AUDIO_SHND_PIN    16
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
@@ -82,6 +85,18 @@ void rp2040_boardinitialize(void)
   #endif
 
   /* --- Place any board specific initialization here --- */
+
+  /* Audio */
+
+  rp2040_gpio_init(RFR_AUDIO_MUTE_PIN);
+  rp2040_gpio_init(RFR_AUDIO_SHND_PIN);
+
+  rp2040_gpio_setdir(RFR_AUDIO_MUTE_PIN, 1);
+  rp2040_gpio_setdir(RFR_AUDIO_SHND_PIN, 1);
+
+  rp2040_gpio_put(RFR_AUDIO_MUTE_PIN, 1);
+  rp2040_gpio_put(RFR_AUDIO_SHND_PIN, 1);
+
 }
 
 void rp2040_spi0select(struct spi_dev_s *dev, uint32_t devid,

@@ -24,6 +24,7 @@
  * Included Files
  ****************************************************************************/
 
+#include <fcntl.h>
 #include <nuttx/config.h>
 
 #include <debug.h>
@@ -40,7 +41,12 @@
 #include <unistd.h>
 #include "rp2040_gpio.h"
 #include "rp2040_pico.h"
-
+#include "rp2040_pwm.h"
+#include "rp2040_pwmdev.h"
+#include <nuttx/timers/pwm.h>
+#include <nuttx/audio/audio.h>
+#include <nuttx/audio/audio_null.h>
+#include <nuttx/audio/tone.h>
 #ifdef CONFIG_ARCH_BOARD_COMMON
 #include "rp2040_common_bringup.h"
 #endif /* CONFIG_ARCH_BOARD_COMMON */
@@ -59,6 +65,8 @@ gspi_dev_t *g_cyw43439 = NULL;
 
 FAR struct spi_dev_s *g_spi_dev0;
 FAR struct lcd_dev_s *g_lcddev;
+FAR struct audio_lowerhalf_s *g_audio;
+
 
 /****************************************************************************
  * Public Functions
@@ -164,9 +172,7 @@ int rp2040_bringup(void)
 
 #endif
 
-  
-  
-
+  g_audio = audio_null_initialize(true);
 
   return OK;
 }
