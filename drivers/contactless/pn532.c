@@ -45,16 +45,8 @@
 
 /* Configuration ************************************************************/
 
-/* Bit order H/W feature must be enabled in order to support LSB first
- * operation.
- */
-
-#if !defined(CONFIG_SPI_HWFEATURES) || !defined(CONFIG_SPI_BITORDER)
-#  error CONFIG_SPI_HWFEATURES=y and CONFIG_SPI_BITORDER=y required by this driver
-#endif
-
-#ifndef CONFIG_ARCH_HAVE_SPI_BITORDER
-#  warning This platform does not support SPI LSB-bit order
+#ifndef CONFIG_ARCH_HAVE_SPI_BITORDER && CL_PN532_HW_BITORDER
+#  warning This platform does not support HW SPI LSB-bit order
 #endif
 
 #ifdef CONFIG_CL_PN532_DEBUG_TX
@@ -125,6 +117,99 @@ static const uint8_t pn532ack[] =
  * Private Functions
  ****************************************************************************/
 
+/* SPI wrappers *************************************************************/
+
+uint8_t pn532_spi_reverse_bitorder(uint8_t b)
+{
+  b = (b & 0xf0) >> 4 | (b & 0x0f) << 4;
+  b = (b & 0xcc) >> 2 | (b & 0x33) << 2;
+  b = (b & 0xaa) >> 1 | (b & 0x55) << 1;
+  return b;
+}
+
+void pn532_spi_reverse_block(uint8_t *block, size_t length)
+{
+  size_t i, j;
+  for (i = 0, j = length - 1; i < j; i++, j--)
+    {
+      uint8_t temp = block[i];
+      block[i] = block[j];
+      block[j] = temp;
+    }
+}
+
+int pn532_spi_send(FAR struct spi_dev_s *spi, uint8_t byte)
+{
+  /* Correct bit order using software */
+
+  ctlsinfo("TX: %X", byte);
+
+#ifndef CL_PN532_HW_BITORDER
+  byte = pn532_spi_reverse_bitorder(byte);
+#endif
+
+  ctlsinfo("TXR: %X", byte);
+
+  uint8_t ans = SPI_SEND(spi, byte);
+  ans = pn532_spi_reverse_bitorder(ans);
+
+  ctlsinfo("RX: %X\n\r\n\r", ans);
+
+  return ans;
+}
+
+void pn532_spi_recvblock(FAR struct spi_dev_s *spi, uint8_t *buffer,
+                         size_t length)
+{
+  /* Correct bit order using software */
+
+#ifndef CL_PN532_HW_BITORDER  
+  for (size_t i = 0; i < length; i++)
+    {
+      buffer[i] = pn532_spi_reverse_bitorder(buffer[i]);
+    }
+  //pn532_spi_reverse_block(buffer, length);
+#endif
+
+  SPI_RECVBLOCK(spi, buffer, length);
+
+#ifndef CL_PN532_HW_BITORDER  
+  for (size_t i = 0; i < length; i++)
+    {
+      buffer[i] = pn532_spi_reverse_bitorder(buffer[i]);
+    }
+  //pn532_spi_reverse_block(buffer, length);
+#endif
+
+}
+
+void pn532_spi_sndblock(FAR struct spi_dev_s *spi, uint8_t *buffer,
+                        size_t length)
+{
+  /* Correct bit order using software */
+
+#ifndef CL_PN532_HW_BITORDER  
+  for (size_t i = 0; i < length; i++)
+    {
+      buffer[i] = pn532_spi_reverse_bitorder(buffer[i]);
+    }
+  //pn532_spi_reverse_block(buffer, length);
+#endif
+
+  SPI_SNDBLOCK(spi, buffer, length);
+
+#ifndef CL_PN532_HW_BITORDER  
+  for (size_t i = 0; i < length; i++)
+    {
+      buffer[i] = pn532_spi_reverse_bitorder(buffer[i]);
+    }
+  //pn532_spi_reverse_block(buffer, length);
+#endif
+
+}
+
+/* PN532 ********************************************************************/
+
 static void pn532_lock(FAR struct spi_dev_s *spi)
 {
   int ret;
@@ -134,11 +219,15 @@ static void pn532_lock(FAR struct spi_dev_s *spi)
   SPI_SETMODE(spi, SPIDEV_MODE0);
   SPI_SETBITS(spi, 8);
 
+  /* Use hardware bit order if possible */
+
+#ifdef CL_PN532_HW_BITORDER
   ret = SPI_HWFEATURES(spi, HWFEAT_LSBFIRST);
   if (ret < 0)
     {
       ctlserr("ERROR: SPI_HWFEATURES failed to set bit order: %d\n", ret);
     }
+#endif
 
   SPI_SETFREQUENCY(spi, CONFIG_PN532_SPI_FREQ);
 }
@@ -157,11 +246,15 @@ static inline void pn532_configspi(FAR struct spi_dev_s *spi)
   SPI_SETMODE(spi, SPIDEV_MODE0);
   SPI_SETBITS(spi, 8);
 
+  /* Use hardware bit order if possible */
+
+#ifdef CL_PN532_HW_BITORDER
   ret = SPI_HWFEATURES(spi, HWFEAT_LSBFIRST);
   if (ret < 0)
     {
       ctlserr("ERROR: SPI_HWFEATURES failed to set bit order: %d\n", ret);
     }
+#endif
 
   SPI_SETFREQUENCY(spi, CONFIG_PN532_SPI_FREQ);
 }
@@ -268,8 +361,8 @@ static uint8_t pn532_status(FAR struct pn532_dev_s *dev)
   pn532_lock(dev->spi);
   pn532_select(dev);
 
-  rs = SPI_SEND(dev->spi, PN532_SPI_STATREAD);
-  rs = SPI_SEND(dev->spi, PN532_SPI_STATREAD);
+  rs = pn532_spi_send(dev->spi, PN532_SPI_STATREAD);
+  rs = pn532_spi_send(dev->spi, PN532_SPI_STATREAD);
 
   pn532_deselect(dev);
   pn532_unlock(dev->spi);
@@ -342,8 +435,8 @@ static void pn532_writecommand(FAR struct pn532_dev_s *dev, uint8_t cmd)
   pn532_select(dev);
   nxsig_usleep(10000);
 
-  SPI_SEND(dev->spi, PN532_SPI_DATAWRITE);
-  SPI_SNDBLOCK(dev->spi, f, FRAME_SIZE(f));
+  pn532_spi_send(dev->spi, PN532_SPI_DATAWRITE);
+  pn532_spi_sndblock(dev->spi, f, FRAME_SIZE(f));
 
   pn532_deselect(dev);
   pn532_unlock(dev->spi);
@@ -369,8 +462,8 @@ int pn532_read(FAR struct pn532_dev_s *dev, FAR uint8_t *buff, uint8_t n)
 {
   pn532_lock(dev->spi);
   pn532_select(dev);
-  SPI_SEND(dev->spi, PN532_SPI_DATAREAD);
-  SPI_RECVBLOCK(dev->spi, buff, n);
+  pn532_spi_send(dev->spi, PN532_SPI_DATAREAD);
+  pn532_spi_recvblock(dev->spi, buff, n);
   pn532_deselect(dev);
   pn532_unlock(dev->spi);
 
@@ -383,7 +476,7 @@ int pn532_read_more(FAR struct pn532_dev_s *dev,
 {
   pn532_lock(dev->spi);
   pn532_select(dev);
-  SPI_RECVBLOCK(dev->spi, buff, n);
+  pn532_spi_recvblock(dev->spi, buff, n);
   pn532_deselect(dev);
   pn532_unlock(dev->spi);
 
@@ -451,8 +544,8 @@ int pn532_write_frame(FAR struct pn532_dev_s *dev, FAR struct pn532_frame *f)
   pn532_select(dev);
   nxsig_usleep(2000);
 
-  SPI_SEND(dev->spi, PN532_SPI_DATAWRITE);
-  SPI_SNDBLOCK(dev->spi, f, FRAME_SIZE(f));
+  pn532_spi_send(dev->spi, PN532_SPI_DATAWRITE);
+  pn532_spi_sndblock(dev->spi, (uint8_t *)f, FRAME_SIZE(f));
   pn532_deselect(dev);
   pn532_unlock(dev->spi);
   tracetx("WriteFrame", (FAR uint8_t *)f, FRAME_SIZE(f));
@@ -721,6 +814,8 @@ uint32_t pn532_read_passive_target_id(FAR struct pn532_dev_s *dev,
   uint32_t res = -EAGAIN;
   int i;
 
+  ctlsinfo("State %d", dev->state);
+
   if (dev->state == PN532_STATE_DATA_READY)
     {
       res = -EIO;
@@ -919,6 +1014,8 @@ static ssize_t _read(FAR struct file *filep, FAR char *buffer, size_t buflen)
 {
   FAR struct inode *inode;
   FAR struct pn532_dev_s *dev;
+
+  ctlsinfo("Reading");
 
   inode = filep->f_inode;
 

@@ -61,6 +61,18 @@ config CL_PN532_DEBUG_RX
 	default n
 	depends on DEBUG_CONTACTLESS
 
+choice
+  prompt "SPI bitorder control"
+  default CL_PN532_SW_BITORDER
+  ---help---
+    This option selects either software or hardware support for reverse SPI bitorder.
+config CL_PN532_SW_BITORDER
+  bool "Software"
+
+config CL_PN532_HW_BITORDER
+  bool "Hardware"
+endchoice
+
 endif # CL_PN532
 
 endif # DRIVERS_CONTACTLESS
