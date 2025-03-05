@@ -39,22 +39,28 @@
  * Pre-Processor Definitions
  ****************************************************************************/
 
-#define PN532_PREAMBLE                      0x00
-#define PN532_STARTCODE1                    0x00
-#define PN532_STARTCODE2                    0xFF
-#define PN532_POSTAMBLE                     0x00
+/* Timings ******************************************************************/
 
-#define PN532_SOF                           0xFF00
+#define PN532_RESET_TIME_US                 10000
 
-#define PN532_HOSTTOPN532                   0xD4
-#define PN532_PN532TOHOST                   0xD5
+/* Frame ********************************************************************/
 
-#define PN532_SPI_STATREAD                  0x02
-#define PN532_SPI_DATAWRITE                 0x01
-#define PN532_SPI_DATAREAD                  0x03
-#define PN532_SPI_READY                     0x01
+#define PN532_FR_PREAMBLE                      0x00
+#define PN532_FR_STARTCODE1                    0x00
+#define PN532_FR_STARTCODE2                    0xFF
+#define PN532_FR_POSTAMBLE                     0x00
 
-/* PN532 Commands */
+#define PN532_FR_SOF                           0xFF00
+
+#define PN532_FR_HOSTTOPN532                   0xD4
+#define PN532_FR_PN532TOHOST                   0xD5
+
+#define PN532_FR_STATREAD                  0x02
+#define PN532_FR_DATAWRITE                 0x01
+#define PN532_FR_DATAREAD                  0x03
+#define PN532_FR_READY                     0x01
+
+/* PN532 Commands ***********************************************************/
 
 #define PN532_COMMAND_DIAGNOSE              0x00
 #define PN532_COMMAND_GETFIRMWAREVERSION    0x02
@@ -91,59 +97,12 @@
 
 #define PN532_WAKEUP                        0x55
 
-#define PN532_SAM_NORMAL_MODE               0x01
-#define PN532_SAM_VIRTUAL_CARD              0x02
-#define PN532_SAM_WIRED_CARD                0x03
-#define PN532_SAM_DUAL_CARD                 0x04
-
-#ifndef CONFIG_PN532_SPI_FREQ
-#  define CONFIG_PN532_SPI_FREQ             (5000000)
-#endif
-
 /****************************************************************************
  * Public Types
  ****************************************************************************/
 
-begin_packed_struct struct pn532_frame
-{
-  uint8_t  preamble;    /* 0x00 */
-  uint16_t start_code;  /* 0x00FF (BE) -> 0xFF00 (LE) */
-  uint8_t  len;         /* 1 byte indicating the number of bytes in
-                         * the data field */
-  uint8_t  lcs;         /* 1 Packet Length Checksum LCS byte that satisfies
-                         * the relation:  Lower byte of [LEN + LCS] = 00h */
-  uint8_t  tfi;         /* Frame identifier 0xD4, 0xD5 */
-  uint8_t  data[];      /* LEN-1 bytes of Packet Data Information.
-                         * The first byte PD0 is the Command Code */
-} end_packed_struct;
-
-begin_packed_struct struct pn_poll_response
-{
-  uint8_t nbtg;
-  uint8_t tg;
-  uint8_t target_data[];
-} end_packed_struct;
-
-begin_packed_struct struct pn_target_type_a
-{
-  uint16_t sens_res;
-  uint8_t  sel_res;
-  uint8_t  nfcid_len;
-  uint8_t  nfcid_data[];
-} end_packed_struct;
-
-struct pn_firmware_version
-{
-  uint8_t ic;
-  uint8_t ver;
-  uint8_t rev;
-  uint8_t support;
-};
-
 struct pn532_dev_s
 {
-  uint8_t state;
-  uint8_t pm_level;
   FAR struct spi_dev_s *spi;          /* SPI interface */
   FAR struct pn532_config_s *config;  /* Board configuration data */
 };
