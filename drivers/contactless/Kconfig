@@ -63,4 +63,10 @@ config CL_PN532_DEBUG_RX
 
 endif # CL_PN532
 
+config CL_NEW_PN532
+  bool "New PN532 NFC reader support"
+  default n
+
+source "drivers/contactless/new-pn532/Kconfig"
+
 endif # DRIVERS_CONTACTLESS

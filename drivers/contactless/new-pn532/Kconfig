@@ -1,0 +1,8 @@
+if CL_NEW_PN532
+
+config CL_NEW_PN532_SPI_FREQ
+  int "PN532 SPI frequency in Hz"
+  default 1000000
+  depends on CL_NEW_PN532
+
+endif # CL_NEW_PN532
