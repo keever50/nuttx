@@ -39,9 +39,15 @@
  * Pre-Processor Definitions
  ****************************************************************************/
 
+#define PN532_IF_SPI  1
+#define PN532_IRQ     0
+#define PN532_SPI_ID  0
+
 /* Timings ******************************************************************/
 
+#define PN532_CMD_TIMEOUT_MS                1000
 #define PN532_RESET_TIME_US                 10000
+#define PN532_POLLING_INTERVAL_MS           50
 
 /* Frame ********************************************************************/
 
@@ -59,6 +65,12 @@
 #define PN532_FR_DATAWRITE                 0x01
 #define PN532_FR_DATAREAD                  0x03
 #define PN532_FR_READY                     0x01
+
+#define PN532_FR_ACK                         0x00FF
+#define PN532_FR_NACK                        0xFF00
+
+#define PN532_FR_INFOSTART_LEN             6
+#define PN532_FR_ACKFRAME_LEN              6
 
 /* PN532 Commands ***********************************************************/
 

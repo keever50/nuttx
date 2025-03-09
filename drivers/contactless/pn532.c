@@ -27,12 +27,14 @@
 #include <nuttx/config.h>
 #include <assert.h>
 #include <debug.h>
+#include <nuttx/contactless/pn532.h>
+#include <nuttx/spi/spi.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
-
+#include <sys/time.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
 #include <nuttx/power/pm.h>
@@ -88,6 +90,14 @@ static ssize_t pn532_write(FAR struct file *filep,
 static int     pn532_ioctl(FAR struct file *filep,
                            int cmd, unsigned long arg);
 
+/* Commands */
+
+static enum pn532_error_e pn532_send_command(struct pn532_dev_s *dev,
+                                             uint8_t *params,
+                                             size_t params_size,
+                                             uint8_t *answer,
+                                             size_t answer_size);
+
 /* Utility */
 
 static uint8_t pn532_checksum(FAR uint8_t *data, int datalen);
@@ -127,7 +137,19 @@ static int pn532_open(FAR struct file *filep)
   dev->config->reset(true);
   nxsig_usleep(PN532_RESET_TIME_US);
   dev->config->reset(false);
+  nxsig_usleep(PN532_RESET_TIME_US);
 
+  uint8_t cmd[] =
+  {
+    PN532_COMMAND_GETFIRMWAREVERSION
+  };
+
+  uint8_t ans[5];
+  pn532_send_command(dev, cmd, sizeof(cmd), ans, sizeof(ans));
+  for (size_t i = 0; i < sizeof(ans); i++)
+    {
+      ctlsinfo("0x%X", ans[i]);
+    }
   return OK;
 }
 
@@ -351,7 +373,7 @@ static inline void pn532_select(FAR struct pn532_dev_s *dev)
     }
   else
     {
-      SPI_SELECT(dev->spi, SPIDEV_CONTACTLESS(0), true);
+      SPI_SELECT(dev->spi, SPIDEV_CONTACTLESS(PN532_SPI_ID), true);
     }
 }
 
@@ -367,18 +389,395 @@ static inline void pn532_deselect(FAR struct pn532_dev_s *dev)
     }
   else
     {
-      SPI_SELECT(dev->spi, SPIDEV_CONTACTLESS(0), false);
+      SPI_SELECT(dev->spi, SPIDEV_CONTACTLESS(PN532_SPI_ID), false);
     }
+}
+
+/* SPI data control  ********************************************************/
+
+static uint8_t pn532_spi_get_status(struct pn532_dev_s *dev)
+{
+  /* ! This function requires a bus lock and select */
+
+  uint8_t status = pn532_spi_send(dev->spi, PN532_FR_STATREAD);
+  if (status)
+    {
+      return PN532_OK;
+    }
+
+  return PN532_BUSY;
+}
+
+static enum pn532_error_e pn532_spi_get_ack(struct pn532_dev_s *dev)
+{
+  /* ! This function requires a bus lock and select */
+
+  enum pn532_error_e ret;
+
+  /* Prepare */
+
+  uint8_t ackframe[PN532_FR_ACKFRAME_LEN];
+
+  /* Receive */
+
+  pn532_spi_recvblock(dev->spi, ackframe, PN532_FR_ACKFRAME_LEN);
+
+  /* Parse */
+
+  size_t i = 0;
+
+  /* Make sure the packet look right */
+
+  if (ackframe[i++] != PN532_FR_PREAMBLE)
+    {
+      ctlserr("Wrong preamble in ack frame");
+      return PN532_UNEXPECTED;
+    }
+
+  if (ackframe[i++] != PN532_FR_STARTCODE1)
+    {
+      ctlserr("Wrong startcode in ack frame");
+      return PN532_UNEXPECTED;
+    }
+
+  if (ackframe[i++] != PN532_FR_STARTCODE2)
+    {
+      ctlserr("Wrong startcode in ack frame");
+      return PN532_UNEXPECTED;
+    }
+
+  /* Check for ACK or NACK */
+
+  uint16_t ack = (uint16_t)ackframe[i];
+  i = i + 2;
+  if (ack == PN532_FR_ACK)
+    {
+      ret = PN532_OK;
+    }
+  else if (ack == PN532_FR_NACK)
+    {
+      ret = PN532_NACK;
+    }
+  else
+    {
+      ctlserr("Invalid ACK/NACK reponse");
+      return PN532_UNEXPECTED;
+    }
+
+  /* Check if the last bit also looks right */
+
+  if (ackframe[i] != PN532_FR_POSTAMBLE)
+    {
+      ctlserr("Wrong postamble in ack frame");
+      return PN532_UNEXPECTED;
+    }
+
+  /* Return result OK/NACK */
+
+  return ret;
+}
+
+static enum pn532_error_e pn532_spi_get_frame(struct pn532_dev_s *dev,
+                                              uint8_t *answer,
+                                              uint8_t answer_len)
+{
+  /* ! This function requires a bus lock and select */
+
+  /* Get start. This contains length and checksum */
+
+  uint8_t start[PN532_FR_INFOSTART_LEN];
+  pn532_spi_recvblock(dev->spi, start, PN532_FR_INFOSTART_LEN);
+
+  /* Make sure the packet look right */
+
+  size_t i = 0;
+  if (start[i++] != PN532_FR_PREAMBLE)
+    {
+      ctlserr("Wrong preamble in frame");
+      return PN532_UNEXPECTED;
+    }
+
+  if (start[i++] != PN532_FR_STARTCODE1)
+    {
+      ctlserr("Wrong startcode in frame");
+      return PN532_UNEXPECTED;
+    }
+
+  if (start[i++] != PN532_FR_STARTCODE2)
+    {
+      ctlserr("Wrong startcode in frame");
+      return PN532_UNEXPECTED;
+    }
+
+  /* Get frame info */
+
+  uint8_t len = start[i++];
+  uint8_t len_cs = start[i++];
+  uint8_t tfi = start[i++];
+
+  /* Verify checksum */
+
+  if ((uint8_t)(len + len_cs) != 0x00)
+    {
+      ctlserr("Frame length checksum fail");
+      return PN532_CHECKSUM_FAIL;
+    }
+
+  /* check TFI the frame identifier */
+
+  if (tfi != PN532_FR_PN532TOHOST)
+    {
+      ctlserr("Wrong frame identifier");
+      return PN532_UNEXPECTED;
+    }
+  
+  /* Does the data fit in the user buffer?
+   * LEN includes the TFI byte. We already checked that.
+   * This is not relevant for the answer returned.
+   * Therefore len-1, removing the TFI from the equation.
+   */
+
+  if (len-1 > answer_len)
+    {
+      ctlserr("Frame data does not fit in user buffer");
+      return PN532_MEMORY;
+    }
+
+  /* Transfer data and calculate checksum */
+
+  uint8_t new_cs = 0;
+  for (size_t d = 0; d < len-1; d++)
+    {
+      /* d is data address, i is offset in frame */
+
+      uint8_t byte = start[i++];
+      new_cs = new_cs + byte;
+      answer[d] = byte;
+    }
+
+  /* Verify data */
+
+  uint8_t data_cs = start[i++];
+  
+  if (new_cs + data_cs != 0x00)
+    {
+      ctlserr("Frame data checksum error");
+      return PN532_CHECKSUM_FAIL;
+    }
+
+  /* Check last postamble */
+
+  if (start[i] != PN532_FR_POSTAMBLE)
+    {
+      ctlserr("Wrong frame postamble");
+      return PN532_UNEXPECTED;
+    }
+
+  return PN532_OK;
+}
+
+
+static enum pn532_error_e pn532_spi_send_frame(struct pn532_dev_s *dev,
+                                               uint8_t *params,
+                                               size_t params_size)
+{
+  /* ! This function requires a bus lock and select */
+
+  /* Prepare sending the frame */
+
+  uint8_t length = 1 + params_size; /* TFI and PD0 to PDn */
+  uint8_t length_cs = (uint8_t)(-(int)length);
+  uint8_t data_cs = (uint8_t)(-(int)pn532_checksum(params, params_size));
+
+  uint8_t hostframe_start[] =
+  {
+    PN532_FR_DATAWRITE, /* Technically not part of frame */
+    PN532_FR_PREAMBLE,
+    PN532_FR_STARTCODE1,
+    PN532_FR_STARTCODE2,
+    length,
+    length_cs,
+    PN532_FR_HOSTTOPN532
+  };
+
+  uint8_t hostframe_end[] =
+  {
+    data_cs,
+    PN532_FR_POSTAMBLE
+  };
+
+  /* Send out */
+
+  /* OPTIMIZATION: find a way to send this all at once */
+
+  pn532_spi_sndblock(dev->spi, hostframe_start, sizeof(hostframe_start));
+  pn532_spi_sndblock(dev->spi, params, params_size);
+  pn532_spi_sndblock(dev->spi, hostframe_end, sizeof(hostframe_end));
+
+  return PN532_OK;
+}
+
+/* SPI Command control ******************************************************/
+
+static enum pn532_error_e pn532_spi_wait_rdy(struct pn532_dev_s *dev)
+{
+  /* In case of no IRQ, do polling */
+
+#if PN532_IRQ == 0
+
+  clock_t timeout = SEC2TICK(PN532_CMD_TIMEOUT_MS);
+  while (clock_systime_ticks()-timeout < SEC2TICK(PN532_CMD_TIMEOUT_MS))
+    {
+      /* Lock only during polling. Allows bus sharing */
+
+      pn532_lock(dev->spi);
+      pn532_select(dev);
+
+      /* Poll */
+
+      enum pn532_error_e ret = pn532_spi_get_status(dev);
+
+      pn532_deselect(dev);
+      pn532_unlock(dev->spi);
+
+      /* Device busy */
+
+      if (ret == PN532_BUSY)
+        {
+          /* Wait a bit so others can use the bus */
+
+          nxsig_usleep((PN532_POLLING_INTERVAL_MS * 1000));
+          continue;
+        }
+
+      return PN532_OK;
+    }
+
+  /* If this happens, the pn532 is blocked.
+   * If the connection is OK, it might be
+   * a good idea to check status before
+   * running commands
+   */
+
+  ctlserr("Timeout at waiting for ready status");
+
+  return PN532_TIMEOUT;
+
+#elif
+  /* TODO: Wait for IRQ line, here */
+
+  /* Hint: Semaphore via hi prio worker */
+
+  /* Hint: Return OK on ready, otherwise TIMEOUT */
+#endif
+}
+
+/* Send a command over SPI and allows bus sharing */
+
+static enum pn532_error_e pn532_spi_send_cmd(struct pn532_dev_s *dev,
+                                      uint8_t *params,
+                                      size_t params_size,
+                                      uint8_t *answer,
+                                      size_t answer_size)
+{
+  enum pn532_error_e ret = 0;
+
+  /* Before doing anything, make sure the dev is available */
+  /* ! Can lock itself */
+
+  ret = pn532_spi_wait_rdy(dev);
+  if (ret != PN532_OK)
+    {
+      return ret;
+    }
+
+  pn532_lock(dev->spi);
+  pn532_select(dev);
+
+  /* Send command */
+
+  ret = pn532_spi_send_frame(dev, params, params_size);
+  if (ret != PN532_OK)
+    {
+      goto frame_exit;
+    }
+
+  pn532_deselect(dev);
+  pn532_unlock(dev->spi);
+
+  /* Wait for response ! Can lock itself */
+
+  ret = pn532_spi_wait_rdy(dev);
+  if (ret != PN532_OK)
+    {
+      return ret;
+    }
+
+  pn532_lock(dev->spi);
+  pn532_select(dev);
+
+  /* Get acknowledge */
+
+  ret = pn532_spi_get_ack(dev);
+  if (ret == PN532_NACK)
+    {
+      ctlswarn("NACK on command");
+      goto frame_exit;
+    }
+  else if (ret != PN532_OK)
+    {
+      goto frame_exit;
+    }
+
+  /* Get response */
+
+  ret = pn532_spi_get_frame(dev, answer, answer_size);
+  if (ret != PN532_OK)
+    {
+      goto frame_exit;
+    }
+
+frame_exit:
+
+  /* OPTIONAL: add ACK/NACK response here. PN532 does not require it. */
+
+  pn532_deselect(dev);
+  pn532_unlock(dev->spi);
+
+  return ret;
+}
+
+/* Command control **********************************************************/
+
+static enum pn532_error_e pn532_send_command(struct pn532_dev_s *dev,
+                                      uint8_t *params,
+                                      size_t params_size,
+                                      uint8_t *answer,
+                                      size_t answer_size)
+{
+  enum pn532_error_e err;
+
+  /* Other interface support can be added here */
+
+  /* SPI interface */
+
+#if PN532_IF_SPI == 1
+  err = pn532_spi_send_cmd(dev, params,
+                           params_size,
+                           answer,
+                           answer_size);
+#endif
+
+  return err;
 }
 
 /* Utility ******************************************************************/
 
 static uint8_t pn532_checksum(FAR uint8_t *data, int datalen)
 {
-  uint8_t sum = 0x00;
-  int i;
+  uint8_t sum = 0;
 
-  for (i = 0; i < datalen; i++)
+  for (size_t i = 0; i < datalen; i++)
     {
       sum += data[i];
     }

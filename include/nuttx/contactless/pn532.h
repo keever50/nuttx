@@ -44,6 +44,19 @@
  * Public Types
  ****************************************************************************/
 
+enum pn532_error_e
+{
+  PN532_OK,
+  PN532_TIMEOUT,
+  PN532_NACK,
+  PN532_CHECKSUM_FAIL,
+  PN532_BUSY,
+  PN532_UNEXPECTED,
+  PN532_MEMORY
+};
+
+/* Legacy *******************************************************************/
+
 enum pn532_state_e
 {
   PN532_STATE_NOT_INIT,
