@@ -38,7 +38,7 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
 #include <nuttx/power/pm.h>
-
+#include <endian.h>
 #include "pn532.h"
 
 /****************************************************************************
@@ -92,10 +92,10 @@ static int     pn532_ioctl(FAR struct file *filep,
 
 /* Commands */
 
-static enum pn532_error_e pn532_send_command(struct pn532_dev_s *dev,
-                                             uint8_t *params,
+static enum pn532_error_e pn532_send_command(FAR struct pn532_dev_s *dev,
+                                             FAR uint8_t *params,
                                              size_t params_size,
-                                             uint8_t *answer,
+                                             FAR uint8_t *answer,
                                              size_t answer_size);
 
 /* Utility */
@@ -141,7 +141,10 @@ static int pn532_open(FAR struct file *filep)
 
   uint8_t cmd[] =
   {
-    PN532_COMMAND_GETFIRMWAREVERSION
+    PN532_COMMAND_SAMCONFIGURATION,
+    0x01,
+    0x00,
+    0x00
   };
 
   uint8_t ans[5];
@@ -393,14 +396,27 @@ static inline void pn532_deselect(FAR struct pn532_dev_s *dev)
     }
 }
 
+static void pn532_spi_start(FAR struct pn532_dev_s *dev)
+{
+  pn532_lock(dev->spi);
+  pn532_select(dev);
+}
+
+static void pn532_spi_end(FAR struct pn532_dev_s *dev)
+{
+  pn532_deselect(dev);
+  pn532_unlock(dev->spi);
+}
+
 /* SPI data control  ********************************************************/
 
-static uint8_t pn532_spi_get_status(struct pn532_dev_s *dev)
+static uint8_t pn532_spi_get_status(FAR struct pn532_dev_s *dev)
 {
   /* ! This function requires a bus lock and select */
 
-  uint8_t status = pn532_spi_send(dev->spi, PN532_FR_STATREAD);
-  if (status)
+  pn532_spi_send(dev->spi, PN532_FR_STATREAD);
+  uint8_t status = pn532_spi_send(dev->spi, 0x00);
+  if (status & 0x01)
     {
       return PN532_OK;
     }
@@ -408,7 +424,7 @@ static uint8_t pn532_spi_get_status(struct pn532_dev_s *dev)
   return PN532_BUSY;
 }
 
-static enum pn532_error_e pn532_spi_get_ack(struct pn532_dev_s *dev)
+static enum pn532_error_e pn532_spi_get_ack(FAR struct pn532_dev_s *dev)
 {
   /* ! This function requires a bus lock and select */
 
@@ -418,9 +434,19 @@ static enum pn532_error_e pn532_spi_get_ack(struct pn532_dev_s *dev)
 
   uint8_t ackframe[PN532_FR_ACKFRAME_LEN];
 
+
+  /* Data read byte */
+
+  pn532_spi_send(dev->spi, PN532_FR_DATAREAD);
+
   /* Receive */
 
   pn532_spi_recvblock(dev->spi, ackframe, PN532_FR_ACKFRAME_LEN);
+  // for(size_t i = 0; i < PN532_FR_ACKFRAME_LEN; i++)
+  //   {
+  //     ackframe[i] = pn532_spi_send(dev->spi, 0x00);
+  //   }
+
 
   /* Parse */
 
@@ -448,8 +474,10 @@ static enum pn532_error_e pn532_spi_get_ack(struct pn532_dev_s *dev)
 
   /* Check for ACK or NACK */
 
-  uint16_t ack = (uint16_t)ackframe[i];
+  uint16_t ack = *(uint16_t *)(ackframe+i);
+  ack = htobe16(ack);
   i = i + 2;
+
   if (ack == PN532_FR_ACK)
     {
       ret = PN532_OK;
@@ -477,11 +505,15 @@ static enum pn532_error_e pn532_spi_get_ack(struct pn532_dev_s *dev)
   return ret;
 }
 
-static enum pn532_error_e pn532_spi_get_frame(struct pn532_dev_s *dev,
-                                              uint8_t *answer,
+static enum pn532_error_e pn532_spi_get_frame(FAR struct pn532_dev_s *dev,
+                                              FAR uint8_t *answer,
                                               uint8_t answer_len)
 {
   /* ! This function requires a bus lock and select */
+
+  /* Send read byte */
+
+  pn532_spi_send(dev->spi, PN532_FR_DATAREAD);
 
   /* Get start. This contains length and checksum */
 
@@ -545,21 +577,27 @@ static enum pn532_error_e pn532_spi_get_frame(struct pn532_dev_s *dev,
 
   /* Transfer data and calculate checksum */
 
-  uint8_t new_cs = 0;
+  pn532_spi_recvblock(dev->spi, answer, len-1);
+
+  uint8_t new_cs = tfi;
   for (size_t d = 0; d < len-1; d++)
     {
-      /* d is data address, i is offset in frame */
-
-      uint8_t byte = start[i++];
-      new_cs = new_cs + byte;
-      answer[d] = byte;
+      uint8_t data = answer[d];
+      new_cs = new_cs + data;
     }
+
+  /* Get last bit of the packet */
+
+  uint8_t last[PN532_FR_INFOSTART_REMAINDER_LEN];
+  pn532_spi_recvblock(dev->spi, last,
+              PN532_FR_INFOSTART_REMAINDER_LEN);
 
   /* Verify data */
 
-  uint8_t data_cs = start[i++];
+  i = 0;
+  uint8_t data_cs = last[i++];
   
-  if (new_cs + data_cs != 0x00)
+  if ((uint8_t)(new_cs + data_cs) != 0x00)
     {
       ctlserr("Frame data checksum error");
       return PN532_CHECKSUM_FAIL;
@@ -567,7 +605,7 @@ static enum pn532_error_e pn532_spi_get_frame(struct pn532_dev_s *dev,
 
   /* Check last postamble */
 
-  if (start[i] != PN532_FR_POSTAMBLE)
+  if (last[i] != PN532_FR_POSTAMBLE)
     {
       ctlserr("Wrong frame postamble");
       return PN532_UNEXPECTED;
@@ -577,8 +615,8 @@ static enum pn532_error_e pn532_spi_get_frame(struct pn532_dev_s *dev,
 }
 
 
-static enum pn532_error_e pn532_spi_send_frame(struct pn532_dev_s *dev,
-                                               uint8_t *params,
+static enum pn532_error_e pn532_spi_send_frame(FAR struct pn532_dev_s *dev,
+                                               FAR uint8_t *params,
                                                size_t params_size)
 {
   /* ! This function requires a bus lock and select */
@@ -587,7 +625,12 @@ static enum pn532_error_e pn532_spi_send_frame(struct pn532_dev_s *dev,
 
   uint8_t length = 1 + params_size; /* TFI and PD0 to PDn */
   uint8_t length_cs = (uint8_t)(-(int)length);
-  uint8_t data_cs = (uint8_t)(-(int)pn532_checksum(params, params_size));
+  uint8_t data_cs = PN532_FR_HOSTTOPN532;
+  for (size_t i = 0; i < params_size; i++)
+    {
+      data_cs = data_cs + params[i];
+    }
+  data_cs = (uint8_t)-(int)data_cs;
 
   uint8_t hostframe_start[] =
   {
@@ -619,26 +662,24 @@ static enum pn532_error_e pn532_spi_send_frame(struct pn532_dev_s *dev,
 
 /* SPI Command control ******************************************************/
 
-static enum pn532_error_e pn532_spi_wait_rdy(struct pn532_dev_s *dev)
+static enum pn532_error_e pn532_spi_wait_rdy(FAR struct pn532_dev_s *dev)
 {
   /* In case of no IRQ, do polling */
 
 #if PN532_IRQ == 0
 
-  clock_t timeout = SEC2TICK(PN532_CMD_TIMEOUT_MS);
-  while (clock_systime_ticks()-timeout < SEC2TICK(PN532_CMD_TIMEOUT_MS))
+  clock_t timeout = clock_systime_ticks();
+  while (clock_systime_ticks()-timeout < MSEC2TICK(PN532_CMD_TIMEOUT_MS))
     {
       /* Lock only during polling. Allows bus sharing */
 
-      pn532_lock(dev->spi);
-      pn532_select(dev);
+      pn532_spi_start(dev);
 
       /* Poll */
 
       enum pn532_error_e ret = pn532_spi_get_status(dev);
 
-      pn532_deselect(dev);
-      pn532_unlock(dev->spi);
+      pn532_spi_end(dev);
 
       /* Device busy */
 
@@ -674,27 +715,21 @@ static enum pn532_error_e pn532_spi_wait_rdy(struct pn532_dev_s *dev)
 
 /* Send a command over SPI and allows bus sharing */
 
-static enum pn532_error_e pn532_spi_send_cmd(struct pn532_dev_s *dev,
-                                      uint8_t *params,
+static enum pn532_error_e pn532_spi_send_cmd(FAR struct pn532_dev_s *dev,
+                                      FAR uint8_t *params,
                                       size_t params_size,
-                                      uint8_t *answer,
+                                      FAR uint8_t *answer,
                                       size_t answer_size)
 {
   enum pn532_error_e ret = 0;
 
-  /* Before doing anything, make sure the dev is available */
-  /* ! Can lock itself */
-
-  ret = pn532_spi_wait_rdy(dev);
-  if (ret != PN532_OK)
-    {
-      return ret;
-    }
-
-  pn532_lock(dev->spi);
-  pn532_select(dev);
-
   /* Send command */
+
+  pn532_spi_start(dev);
+
+  /* Wake up the device by waiting a bit */
+
+  nxsig_usleep(PN532_WAKEUP_US);
 
   ret = pn532_spi_send_frame(dev, params, params_size);
   if (ret != PN532_OK)
@@ -702,21 +737,19 @@ static enum pn532_error_e pn532_spi_send_cmd(struct pn532_dev_s *dev,
       goto frame_exit;
     }
 
-  pn532_deselect(dev);
-  pn532_unlock(dev->spi);
+  pn532_spi_end(dev);
 
-  /* Wait for response ! Can lock itself */
+  /* Wait for ready */
 
   ret = pn532_spi_wait_rdy(dev);
   if (ret != PN532_OK)
     {
-      return ret;
+      goto frame_exit;
     }
 
-  pn532_lock(dev->spi);
-  pn532_select(dev);
-
   /* Get acknowledge */
+
+  pn532_spi_start(dev);
 
   ret = pn532_spi_get_ack(dev);
   if (ret == PN532_NACK)
@@ -729,7 +762,19 @@ static enum pn532_error_e pn532_spi_send_cmd(struct pn532_dev_s *dev,
       goto frame_exit;
     }
 
+  pn532_spi_end(dev);
+
+  /* Wait for ready */
+
+  ret = pn532_spi_wait_rdy(dev);
+  if (ret != PN532_OK)
+    {
+      goto frame_exit;
+    }
+
   /* Get response */
+
+  pn532_spi_start(dev);
 
   ret = pn532_spi_get_frame(dev, answer, answer_size);
   if (ret != PN532_OK)
@@ -741,18 +786,17 @@ frame_exit:
 
   /* OPTIONAL: add ACK/NACK response here. PN532 does not require it. */
 
-  pn532_deselect(dev);
-  pn532_unlock(dev->spi);
+  pn532_spi_end(dev);
 
   return ret;
 }
 
 /* Command control **********************************************************/
 
-static enum pn532_error_e pn532_send_command(struct pn532_dev_s *dev,
-                                      uint8_t *params,
+static enum pn532_error_e pn532_send_command(FAR struct pn532_dev_s *dev,
+                                      FAR uint8_t *params,
                                       size_t params_size,
-                                      uint8_t *answer,
+                                      FAR uint8_t *answer,
                                       size_t answer_size)
 {
   enum pn532_error_e err;

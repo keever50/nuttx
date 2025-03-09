@@ -47,7 +47,8 @@
 
 #define PN532_CMD_TIMEOUT_MS                1000
 #define PN532_RESET_TIME_US                 10000
-#define PN532_POLLING_INTERVAL_MS           50
+#define PN532_POLLING_INTERVAL_MS           0
+#define PN532_WAKEUP_US                     2000
 
 /* Frame ********************************************************************/
 
@@ -70,6 +71,7 @@
 #define PN532_FR_NACK                        0xFF00
 
 #define PN532_FR_INFOSTART_LEN             6
+#define PN532_FR_INFOSTART_REMAINDER_LEN   2
 #define PN532_FR_ACKFRAME_LEN              6
 
 /* PN532 Commands ***********************************************************/
