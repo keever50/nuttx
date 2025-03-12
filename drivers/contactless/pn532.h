@@ -43,12 +43,14 @@
 #define PN532_IRQ     0
 #define PN532_SPI_ID  0
 
+#define PN532_WORKBUFFER_SIZE               128
+
 /* Timings ******************************************************************/
 
-#define PN532_CMD_TIMEOUT_MS                1000
 #define PN532_RESET_TIME_US                 10000
-#define PN532_POLLING_INTERVAL_MS           0
+#define PN532_POLLING_INTERVAL_MS           0 /* Time between ready checks. 0 = none */
 #define PN532_WAKEUP_US                     2000
+#define PN532_TIMEOUT_MS_DEFAULT            1000
 
 /* Frame ********************************************************************/
 
@@ -57,22 +59,20 @@
 #define PN532_FR_STARTCODE2                    0xFF
 #define PN532_FR_POSTAMBLE                     0x00
 
-#define PN532_FR_SOF                           0xFF00
-
 #define PN532_FR_HOSTTOPN532                   0xD4
 #define PN532_FR_PN532TOHOST                   0xD5
 
-#define PN532_FR_STATREAD                  0x02
-#define PN532_FR_DATAWRITE                 0x01
-#define PN532_FR_DATAREAD                  0x03
-#define PN532_FR_READY                     0x01
+#define PN532_FR_STATREAD                      0x02
+#define PN532_FR_DATAWRITE                     0x01
+#define PN532_FR_DATAREAD                      0x03
+#define PN532_FR_READY                         0x01
 
-#define PN532_FR_ACK                         0x00FF
-#define PN532_FR_NACK                        0xFF00
+#define PN532_FR_ACK                           0x00FF
+#define PN532_FR_NACK                          0xFF00
 
-#define PN532_FR_INFOSTART_LEN             6
-#define PN532_FR_INFOSTART_REMAINDER_LEN   2
-#define PN532_FR_ACKFRAME_LEN              6
+#define PN532_FR_INFOSTART_LEN                 6
+#define PN532_FR_INFOSTART_REMAINDER_LEN       2
+#define PN532_FR_ACKFRAME_LEN                  6
 
 /* PN532 Commands ***********************************************************/
 
@@ -111,6 +111,10 @@
 
 #define PN532_WAKEUP                        0x55
 
+/* Param lengths */
+
+#define PN532_COMMAND_INLISTPASSIVETARGET_PARAMS 3
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -119,12 +123,32 @@ struct pn532_dev_s
 {
   FAR struct spi_dev_s *spi;          /* SPI interface */
   FAR struct pn532_config_s *config;  /* Board configuration data */
+  uint8_t active;
+  uint8_t work_buffer[PN532_WORKBUFFER_SIZE];
+};
+
+enum pn532_error_e
+{
+  PN532_OK,
+  PN532_TIMEOUT,
+  PN532_NACK,
+  PN532_CHECKSUM_FAIL,
+  PN532_BUSY,
+  PN532_UNEXPECTED,
+  PN532_MEMORY
+};
+
+enum pn532_baudmod_e
+{
+  PN532_BAUDMOD_TYPE_A_106K,
+  PN532_BAUDMOD_FELICA_212K,
+  PN532_BAUDMOD_FELICA_424K,
+  PN532_BAUDMOD_TYPE_B_106K,
+  PN532_BAUDMOD_JEWEL_106K
 };
 
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
-
-bool pn532_set_config(struct pn532_dev_s *dev, uint8_t flags);
 
 #endif /* __DRIVERS_CONTACTLESS_PN532_H */

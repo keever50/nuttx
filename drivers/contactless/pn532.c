@@ -96,11 +96,22 @@ static enum pn532_error_e pn532_send_command(FAR struct pn532_dev_s *dev,
                                              FAR uint8_t *params,
                                              size_t params_size,
                                              FAR uint8_t *answer,
-                                             size_t answer_size);
+                                             size_t answer_size,
+                                             uint32_t timeout_ms);
 
-/* Utility */
+static enum pn532_error_e pn532_samconfig(FAR struct pn532_dev_s *dev,
+                                              enum pn532_sam_e mode,
+                                              uint8_t timeout,
+                                              uint8_t irq_enabled);
 
-static uint8_t pn532_checksum(FAR uint8_t *data, int datalen);
+
+static enum pn532_error_e
+pn532_in_list_pasv_tgt(FAR struct pn532_dev_s *dev,
+                       uint8_t max_targets,
+                       enum pn532_baudmod_e baudmod,
+                       uint8_t *initiator_data,
+                       size_t data_len,
+                       uint32_t timeout_ms);
 
 /****************************************************************************
  * Private Data
@@ -132,6 +143,10 @@ static int pn532_open(FAR struct file *filep)
   DEBUGASSERT(inode->i_private);
   dev = inode->i_private;
 
+  /* Assume device is sleeping */
+
+  dev->active = false;
+
   /* Hardware reset the device */
 
   dev->config->reset(true);
@@ -139,20 +154,27 @@ static int pn532_open(FAR struct file *filep)
   dev->config->reset(false);
   nxsig_usleep(PN532_RESET_TIME_US);
 
-  uint8_t cmd[] =
-  {
-    PN532_COMMAND_SAMCONFIGURATION,
-    0x01,
-    0x00,
-    0x00
-  };
+  /* Set default mode */
 
-  uint8_t ans[5];
-  pn532_send_command(dev, cmd, sizeof(cmd), ans, sizeof(ans));
-  for (size_t i = 0; i < sizeof(ans); i++)
+  enum pn532_error_e err;
+
+  err = pn532_samconfig(dev, PN532_SAM_NORMAL,
+                      PN532_NO_TIMEOUT,
+                      0);
+
+  if (err != PN532_OK)
     {
-      ctlsinfo("0x%X", ans[i]);
+      return ERROR;
     }
+
+  // TEST
+
+  uint8_t in_data[] =
+  {
+
+  };
+  err = pn532_in_list_pasv_tgt(dev, 2, PN532_BAUDMOD_TYPE_A_106K, in_data, sizeof(in_data), 10000);
+
   return OK;
 }
 
@@ -410,6 +432,16 @@ static void pn532_spi_end(FAR struct pn532_dev_s *dev)
 
 /* SPI data control  ********************************************************/
 
+/****************************************************************************
+ * Name: pn532_spi_get_status
+ *
+ * Description:
+ *   Polls the status of the device over SPI.
+ *   This checks whether the device
+ *   is busy or not through SPI communication.
+ *
+ ****************************************************************************/
+
 static uint8_t pn532_spi_get_status(FAR struct pn532_dev_s *dev)
 {
   /* ! This function requires a bus lock and select */
@@ -424,6 +456,15 @@ static uint8_t pn532_spi_get_status(FAR struct pn532_dev_s *dev)
   return PN532_BUSY;
 }
 
+/****************************************************************************
+ * Name: pn532_spi_get_ack
+ *
+ * Description:
+ *   Gets an ack frame from the device over SPI and parses it.
+ *   This will also verify the packet.
+ *
+ ****************************************************************************/
+
 static enum pn532_error_e pn532_spi_get_ack(FAR struct pn532_dev_s *dev)
 {
   /* ! This function requires a bus lock and select */
@@ -434,7 +475,6 @@ static enum pn532_error_e pn532_spi_get_ack(FAR struct pn532_dev_s *dev)
 
   uint8_t ackframe[PN532_FR_ACKFRAME_LEN];
 
-
   /* Data read byte */
 
   pn532_spi_send(dev->spi, PN532_FR_DATAREAD);
@@ -442,11 +482,6 @@ static enum pn532_error_e pn532_spi_get_ack(FAR struct pn532_dev_s *dev)
   /* Receive */
 
   pn532_spi_recvblock(dev->spi, ackframe, PN532_FR_ACKFRAME_LEN);
-  // for(size_t i = 0; i < PN532_FR_ACKFRAME_LEN; i++)
-  //   {
-  //     ackframe[i] = pn532_spi_send(dev->spi, 0x00);
-  //   }
-
 
   /* Parse */
 
@@ -474,7 +509,7 @@ static enum pn532_error_e pn532_spi_get_ack(FAR struct pn532_dev_s *dev)
 
   /* Check for ACK or NACK */
 
-  uint16_t ack = *(uint16_t *)(ackframe+i);
+  uint16_t ack = *(uint16_t *)(ackframe + i);
   ack = htobe16(ack);
   i = i + 2;
 
@@ -504,6 +539,15 @@ static enum pn532_error_e pn532_spi_get_ack(FAR struct pn532_dev_s *dev)
 
   return ret;
 }
+
+/****************************************************************************
+ * Name: pn532_spi_get_frame
+ *
+ * Description:
+ *   Gets a normal frame from the device over SPI.
+ *   Also parses and verifies the frame.
+ *
+ ****************************************************************************/
 
 static enum pn532_error_e pn532_spi_get_frame(FAR struct pn532_dev_s *dev,
                                               FAR uint8_t *answer,
@@ -562,14 +606,14 @@ static enum pn532_error_e pn532_spi_get_frame(FAR struct pn532_dev_s *dev,
       ctlserr("Wrong frame identifier");
       return PN532_UNEXPECTED;
     }
-  
+
   /* Does the data fit in the user buffer?
    * LEN includes the TFI byte. We already checked that.
    * This is not relevant for the answer returned.
    * Therefore len-1, removing the TFI from the equation.
    */
 
-  if (len-1 > answer_len)
+  if (len - 1 > answer_len)
     {
       ctlserr("Frame data does not fit in user buffer");
       return PN532_MEMORY;
@@ -577,10 +621,10 @@ static enum pn532_error_e pn532_spi_get_frame(FAR struct pn532_dev_s *dev,
 
   /* Transfer data and calculate checksum */
 
-  pn532_spi_recvblock(dev->spi, answer, len-1);
+  pn532_spi_recvblock(dev->spi, answer, len - 1);
 
   uint8_t new_cs = tfi;
-  for (size_t d = 0; d < len-1; d++)
+  for (size_t d = 0; d < len - 1; d++)
     {
       uint8_t data = answer[d];
       new_cs = new_cs + data;
@@ -596,7 +640,7 @@ static enum pn532_error_e pn532_spi_get_frame(FAR struct pn532_dev_s *dev,
 
   i = 0;
   uint8_t data_cs = last[i++];
-  
+
   if ((uint8_t)(new_cs + data_cs) != 0x00)
     {
       ctlserr("Frame data checksum error");
@@ -614,6 +658,13 @@ static enum pn532_error_e pn532_spi_get_frame(FAR struct pn532_dev_s *dev,
   return PN532_OK;
 }
 
+/****************************************************************************
+ * Name: pn532_spi_send_frame
+ *
+ * Description:
+ *   Sends a normal frame over SPI
+ *
+ ****************************************************************************/
 
 static enum pn532_error_e pn532_spi_send_frame(FAR struct pn532_dev_s *dev,
                                                FAR uint8_t *params,
@@ -630,6 +681,7 @@ static enum pn532_error_e pn532_spi_send_frame(FAR struct pn532_dev_s *dev,
     {
       data_cs = data_cs + params[i];
     }
+
   data_cs = (uint8_t)-(int)data_cs;
 
   uint8_t hostframe_start[] =
@@ -662,14 +714,25 @@ static enum pn532_error_e pn532_spi_send_frame(FAR struct pn532_dev_s *dev,
 
 /* SPI Command control ******************************************************/
 
-static enum pn532_error_e pn532_spi_wait_rdy(FAR struct pn532_dev_s *dev)
+/****************************************************************************
+ * Name: pn532_spi_wait_rdy
+ *
+ * Description:
+ *   Wait (block) till the device is ready.
+ *   In case of polling, over SPI.
+ *
+ ****************************************************************************/
+
+static enum pn532_error_e pn532_spi_wait_rdy(FAR struct pn532_dev_s *dev,
+                                             uint32_t timeout_ms,
+                                             uint8_t critical)
 {
   /* In case of no IRQ, do polling */
 
 #if PN532_IRQ == 0
 
   clock_t timeout = clock_systime_ticks();
-  while (clock_systime_ticks()-timeout < MSEC2TICK(PN532_CMD_TIMEOUT_MS))
+  while (clock_systime_ticks()-timeout < MSEC2TICK(timeout_ms))
     {
       /* Lock only during polling. Allows bus sharing */
 
@@ -694,13 +757,11 @@ static enum pn532_error_e pn532_spi_wait_rdy(FAR struct pn532_dev_s *dev)
       return PN532_OK;
     }
 
-  /* If this happens, the pn532 is blocked.
-   * If the connection is OK, it might be
-   * a good idea to check status before
-   * running commands
-   */
+  if (critical)
+    {
+      ctlserr("Timed out waiting for ready status");
+    }
 
-  ctlserr("Timeout at waiting for ready status");
 
   return PN532_TIMEOUT;
 
@@ -713,13 +774,22 @@ static enum pn532_error_e pn532_spi_wait_rdy(FAR struct pn532_dev_s *dev)
 #endif
 }
 
-/* Send a command over SPI and allows bus sharing */
+/****************************************************************************
+ * Name: pn532_spi_send_cmd
+ *
+ * Description:
+ *   Sends a command over SPI to device.
+ *   This contains the logic flow to control sending and receiving
+ *   SPI frames. The bus can be shared between actions.
+ *
+ ****************************************************************************/
 
 static enum pn532_error_e pn532_spi_send_cmd(FAR struct pn532_dev_s *dev,
                                       FAR uint8_t *params,
                                       size_t params_size,
                                       FAR uint8_t *answer,
-                                      size_t answer_size)
+                                      size_t answer_size,
+                                      uint32_t timeout_ms)
 {
   enum pn532_error_e ret = 0;
 
@@ -727,9 +797,13 @@ static enum pn532_error_e pn532_spi_send_cmd(FAR struct pn532_dev_s *dev,
 
   pn532_spi_start(dev);
 
-  /* Wake up the device by waiting a bit */
+  /* Wake up the device by waiting a bit if sleeping */
 
-  nxsig_usleep(PN532_WAKEUP_US);
+  if (dev->active == false)
+    {
+      nxsig_usleep(PN532_WAKEUP_US);
+      dev->active = true;
+    }
 
   ret = pn532_spi_send_frame(dev, params, params_size);
   if (ret != PN532_OK)
@@ -741,7 +815,7 @@ static enum pn532_error_e pn532_spi_send_cmd(FAR struct pn532_dev_s *dev,
 
   /* Wait for ready */
 
-  ret = pn532_spi_wait_rdy(dev);
+  ret = pn532_spi_wait_rdy(dev, PN532_TIMEOUT_MS_DEFAULT, true);
   if (ret != PN532_OK)
     {
       goto frame_exit;
@@ -766,7 +840,7 @@ static enum pn532_error_e pn532_spi_send_cmd(FAR struct pn532_dev_s *dev,
 
   /* Wait for ready */
 
-  ret = pn532_spi_wait_rdy(dev);
+  ret = pn532_spi_wait_rdy(dev, timeout_ms, false);
   if (ret != PN532_OK)
     {
       goto frame_exit;
@@ -793,11 +867,21 @@ frame_exit:
 
 /* Command control **********************************************************/
 
+/****************************************************************************
+ * Name: pn532_send_command
+ *
+ * Description:
+ *   Sends a command over the configured interface.
+ *   This is the top level function for controlling the device.
+ *
+ ****************************************************************************/
+
 static enum pn532_error_e pn532_send_command(FAR struct pn532_dev_s *dev,
                                       FAR uint8_t *params,
                                       size_t params_size,
                                       FAR uint8_t *answer,
-                                      size_t answer_size)
+                                      size_t answer_size,
+                                      uint32_t timeout_ms)
 {
   enum pn532_error_e err;
 
@@ -809,28 +893,110 @@ static enum pn532_error_e pn532_send_command(FAR struct pn532_dev_s *dev,
   err = pn532_spi_send_cmd(dev, params,
                            params_size,
                            answer,
-                           answer_size);
+                           answer_size,
+                           timeout_ms);
 #endif
 
   return err;
 }
 
-/* Utility ******************************************************************/
+/* Commands *****************************************************************/
 
-static uint8_t pn532_checksum(FAR uint8_t *data, int datalen)
+/****************************************************************************
+ * Name: pn532_samconfig
+ *
+ * Description:
+ *   This command is used to select the data flow path by configuring
+ *   the internal serial data switch.
+ *
+ ****************************************************************************/
+
+static enum pn532_error_e pn532_samconfig(FAR struct pn532_dev_s *dev,
+                                              enum pn532_sam_e mode,
+                                              uint8_t timeout,
+                                              uint8_t irq_enabled)
 {
-  uint8_t sum = 0;
+  enum pn532_error_e ret;
 
-  for (size_t i = 0; i < datalen; i++)
+  uint8_t params[] =
+  {
+    PN532_COMMAND_SAMCONFIGURATION,
+    mode,
+    timeout,
+    irq_enabled
+  };
+
+  uint8_t ans[1];
+
+  ret = pn532_send_command(dev, params, sizeof(params),
+             ans, sizeof(ans),
+             PN532_TIMEOUT_MS_DEFAULT);
+
+  return ret;
+}
+
+/****************************************************************************
+ * Name: pn532_in_list_pasv_tgt
+ *
+ * Description:
+ *   The goal of this command is to detect as max_targets
+ *   as possible in passive mode.
+ *
+ ****************************************************************************/
+
+static enum pn532_error_e
+pn532_in_list_pasv_tgt(FAR struct pn532_dev_s *dev,
+                       uint8_t max_targets,
+                       enum pn532_baudmod_e baudmod,
+                       uint8_t *initiator_data,
+                       size_t data_len,
+                       uint32_t timeout_ms)
+{
+  enum pn532_error_e ret;
+
+  /* data and params cant be larger than the working buffer */
+
+  size_t totalsize = PN532_COMMAND_INLISTPASSIVETARGET_PARAMS + data_len;
+  if (totalsize > PN532_WORKBUFFER_SIZE)
     {
-      sum += data[i];
+      ctlserr("Not enough space in working buffer for initiator data");
+      return PN532_MEMORY;
     }
 
-  return sum;
+  uint8_t params[PN532_COMMAND_INLISTPASSIVETARGET_PARAMS] =
+  {
+    PN532_COMMAND_INLISTPASSIVETARGET,
+    max_targets,
+    (uint8_t)baudmod
+  };
+
+  /* Store params + data in working buffer */
+
+  memcpy(dev->work_buffer, params, sizeof(params));
+  memcpy(dev->work_buffer + sizeof(params), initiator_data, data_len);
+
+  ret = pn532_send_command(dev, dev->work_buffer, totalsize,
+                           dev->work_buffer, sizeof(dev->work_buffer),
+                           timeout_ms);
+
+  /* Get answer ... */
+
+  ctlsinfo("Detection");
+
+  return ret;
 }
 
 /****************************************************************************
  * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: pn532_register
+ *
+ * Description:
+ *   Registers the device to a path. A good path name would look like
+ *   /dev/rfid0, but anything can be used.
+ *
  ****************************************************************************/
 
 int pn532_register(FAR const char *devpath, FAR struct spi_dev_s *spi,

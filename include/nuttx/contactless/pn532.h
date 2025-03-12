@@ -38,32 +38,11 @@
  * Pre-Processor Definitions
  ****************************************************************************/
 
-#define PN532_MIFARE_ISO14443A          (0x00)
+#define PN532_NO_TIMEOUT                (0x00)
 
 /****************************************************************************
  * Public Types
  ****************************************************************************/
-
-enum pn532_error_e
-{
-  PN532_OK,
-  PN532_TIMEOUT,
-  PN532_NACK,
-  PN532_CHECKSUM_FAIL,
-  PN532_BUSY,
-  PN532_UNEXPECTED,
-  PN532_MEMORY
-};
-
-/* Legacy *******************************************************************/
-
-enum pn532_state_e
-{
-  PN532_STATE_NOT_INIT,
-  PN532_STATE_IDLE,
-  PN532_STATE_CMD_SENT,
-  PN532_STATE_DATA_READY,
-};
 
 struct pn532_dev_s;
 struct pn532_config_s
@@ -76,40 +55,12 @@ struct pn532_config_s
   int (*irqattach)(void *dev, xcpt_t isr);
 };
 
-enum PN_SAM_MODE
+enum pn532_sam_e
 {
-  PN_SAM_NORMAL_MODE = 0x01,
-  PN_SAM_VIRTUAL_CARD,
-  PN_SAM_WIRED_CARD,
-  SAM_DUAL_CARD
-};
-
-struct pn_sam_settings_s
-{
-  enum PN_SAM_MODE mode;  /* Mode */
-  uint8_t timeout;        /* Timeout: LSB=50ms 0x14*50ms = 1sec */
-  uint8_t irq_en;         /* If 1 - enable P-70, IRQ */
-};
-
-enum PN_RF_CONFIG_ITEM
-{
-  PN_RF_CONFIG_RF_FIELD         = 0x01,
-  PN_RF_CONFIG_VARIOUS_TIMINGS  = 0x02,
-  PN_RF_CONFIG_ITEM_ANALOG_106A = 0x0a,
-  PN_RF_CONFIG_ITEM_ANALOG_212  = 0x0b,
-};
-
-struct pn_rf_config_s
-{
-  uint8_t cfg_item;       /* Item */
-  uint8_t data_size;      /* number of config items */
-  uint8_t config[11];     /* Item config data */
-};
-
-struct pn_mifare_tag_data_s
-{
-  uint32_t data;
-  uint8_t address;
+  PN532_SAM_NORMAL = 1,
+  PN532_SAM_VIRTUAL,
+  PN532_SAM_WIRED,
+  PN532_SAM_DUAL
 };
 
 /****************************************************************************
