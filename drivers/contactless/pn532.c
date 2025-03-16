@@ -27,6 +27,7 @@
 #include <nuttx/config.h>
 #include <assert.h>
 #include <debug.h>
+#include <nuttx/contactless/ioctl.h>
 #include <nuttx/contactless/pn532.h>
 #include <nuttx/spi/spi.h>
 #include <stdlib.h>
@@ -63,6 +64,16 @@
  * Private Function Prototypes
  ****************************************************************************/
 
+/* ioctl */
+
+int pn532_ioctl_scan(struct pn532_dev_s *dev,
+  struct ctls_scan_params_s *params);
+
+int pn532_ioctl_poll_status(struct pn532_dev_s *dev, enum ctls_status_e *status);
+
+int pn532_get_results(struct pn532_dev_s *dev,
+  struct ctls_scan_result_s *results);
+
 /* SPI control */
 
 static inline void pn532_configspi(FAR struct spi_dev_s *spi);
@@ -92,11 +103,13 @@ static int     pn532_ioctl(FAR struct file *filep,
 
 /* Commands */
 
+static enum pn532_error_e pn532_get_status(FAR struct pn532_dev_s *dev);
+
 static enum pn532_error_e pn532_send_command(FAR struct pn532_dev_s *dev,
                                              FAR uint8_t *params,
                                              size_t params_size,
                                              FAR uint8_t *answer,
-                                             size_t answer_size,
+                                             uint8_t *answer_size,
                                              uint32_t timeout_ms);
 
 static enum pn532_error_e pn532_samconfig(FAR struct pn532_dev_s *dev,
@@ -104,14 +117,115 @@ static enum pn532_error_e pn532_samconfig(FAR struct pn532_dev_s *dev,
                                               uint8_t timeout,
                                               uint8_t irq_enabled);
 
-
 static enum pn532_error_e
 pn532_in_list_pasv_tgt(FAR struct pn532_dev_s *dev,
                        uint8_t max_targets,
                        enum pn532_baudmod_e baudmod,
-                       uint8_t *initiator_data,
+                       FAR uint8_t *initiator_data,
                        size_t data_len,
-                       uint32_t timeout_ms);
+                       uint32_t timeout_ms,
+                       FAR struct pn532_card_s *cards,
+                       FAR uint8_t *cards_detected);
+
+/* Parsing */
+
+// SHOULD BE PROTOTYPES
+
+static enum pn532_error_e pn532_parse_type_a(uint8_t max_cards,
+                        FAR uint8_t *data,
+                        size_t data_len,
+                        FAR struct pn532_card_s *output_cards,
+                        FAR uint8_t *cards_detected)
+{
+  const size_t max_card_len = sizeof(union pn532_card_info_u);
+  size_t i = 0;
+
+  for (size_t c = 0; c < (*cards_detected); c++)
+    {
+      /* Get output card */
+
+      FAR struct pn532_card_s *card = &(output_cards[c]);
+
+      /* Parse */
+
+      card->target_nr                 = data[i++];
+      card->type                      = PN532_BAUDMOD_TYPE_A_106K;
+      card->info.mifare_a.sens_res[0] = data[i++];
+      card->info.mifare_a.sens_res[1] = data[i++];
+      card->info.mifare_a.sel_res     = data[i++];
+      size_t uid_len                  = data[i++];
+
+      /* Parse UID */
+
+      card->info.mifare_a.uid_len = uid_len;
+      ctlsinfo("UID dump:");
+      for (size_t ui = 0; ui < uid_len; ui++)
+        {
+          uint8_t n = data[i++];
+          card->info.mifare_a.uid[ui] = n;
+          ctlsinfo("0x%X", n);
+        }
+      ctlsinfo("End UID dump");
+
+      /* ATS, not implemented. Should be here if its enabled */
+    }
+
+  return PN532_OK;
+}
+
+static enum pn532_error_e pn532_parse_cards(uint8_t max_cards,
+                        enum pn532_baudmod_e type,
+                        FAR uint8_t *data,
+                        uint8_t data_len,
+                        FAR struct pn532_card_s *output_cards,
+                        FAR uint8_t *cards_detected)
+{
+  /* Dump card */
+
+  ctlsinfo("Card info dump: ");
+  for (size_t d = 0; d < data_len; d++)
+    {
+      ctlsinfo("0x%X", data[d]);
+    }
+  ctlsinfo("End info dump");
+
+  /* First two bytes are frame idents */
+
+  /* Check if this is parsable data
+   * [d5][4b][nbtg][data1][data2]
+   */
+
+  size_t i = 0;
+  if (data[i++] != 0x4b)
+    {
+      ctlserr("Parsing error. Incorrect data start byte");
+      return PN532_UNEXPECTED;
+    }
+
+  /* Number of targets */
+
+  (*cards_detected) = data[i++];
+  ctlsinfo("%d Card/s detected", (*cards_detected));
+
+  /* Parsing is card dependend from here */
+
+  switch (type)
+    {
+      case PN532_BAUDMOD_TYPE_A_106K:
+      {
+        return pn532_parse_type_a(max_cards, data + i,
+          data_len - i, output_cards, cards_detected);
+      }
+
+      default:
+      {
+        ctlserr("Parsing error. Unsupported card");
+        return PN532_UNSUPPORTED_CARD;
+      }
+    }
+
+  return PN532_OK;
+}
 
 /****************************************************************************
  * Private Data
@@ -166,14 +280,6 @@ static int pn532_open(FAR struct file *filep)
     {
       return ERROR;
     }
-
-  // TEST
-
-  uint8_t in_data[] =
-  {
-
-  };
-  err = pn532_in_list_pasv_tgt(dev, 2, PN532_BAUDMOD_TYPE_A_106K, in_data, sizeof(in_data), 10000);
 
   return OK;
 }
@@ -238,40 +344,162 @@ static int pn532_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
   switch (cmd)
     {
-    case PN532IOC_READ_TAG_DATA:
-      break;
+    case CLIOC_TYPE_A_SET_PARAMS:
+    {
+      memcpy(&dev->type_a_params, (struct ctls_type_a_params_s *)arg,
+      sizeof(dev->type_a_params));
+      return OK;
+    }
 
-    case PN532IOC_WRITE_TAG_DATA:
-      break;
+    case CLIOC_SCAN:
+    {
+      return pn532_ioctl_scan(dev, (struct ctls_scan_params_s *)arg);
+    }
 
-    case PN532IOC_SET_SAM_CONF:
-      break;
-
-    case PN532IOC_READ_PASSIVE:
-      break;
-
-    case PN532IOC_SET_RF_CONF:
-      break;
-
-    case PN532IOC_SEND_CMD_READ_PASSIVE:
-      break;
-
-    case PN532IOC_GET_DATA_READY:
-      break;
-
-    case PN532IOC_GET_TAG_ID:
-      break;
-
-    case PN532IOC_GET_STATE:
-      break;
+    case CLIOC_POLL_STATUS:
+    {
+      return pn532_ioctl_poll_status(dev, (enum ctls_status_e *)arg);
+    }
 
     default:
-      ctlserr("ERROR: Unrecognized cmd: %d\n", cmd);
-      ret = -ENOTTY;
-      break;
+      ctlserr("Unexpected ioctl cmd: 0x%X\n", cmd);
+      return -ENOTTY;
     }
 
   return ret;
+}
+
+/* ioctl top level commands  ************************************************/
+
+/* Scan type A */
+
+int pn532_scan_type_a(struct pn532_dev_s *dev,
+                      struct ctls_scan_params_s *params)
+{
+  /* Gather info */
+
+  size_t i = 0;
+  uint8_t max_targets = params->max_at_once;
+
+  /* Program work buffer */
+
+  dev->work_buffer[i++] = PN532_COMMAND_INLISTPASSIVETARGET;
+  dev->work_buffer[i++] = max_targets;
+  dev->work_buffer[i++] = PN532_BAUDMOD_TYPE_A_106K;
+
+  /* UID target enabled */
+
+  if (dev->type_a_params.enable_target_uid)
+    {
+      struct ctls_uid_s uid = dev->type_a_params.target_uid;
+
+      switch (uid.size)
+        {
+          case 4:
+          {
+            memcpy(dev->work_buffer + i, uid.bytes, uid.size);
+            i = i + uid.size;
+            break;
+          }
+
+          case 7:
+          {
+            dev->work_buffer[i++] = PN532_TYPE_A_CASCADE_TAG;
+            memcpy(dev->work_buffer + i, uid.bytes, uid.size);
+            i = i + uid.size;
+          }
+
+          case 10:
+          {
+            dev->work_buffer[i++] = PN532_TYPE_A_CASCADE_TAG;
+            memcpy(dev->work_buffer + i, uid.bytes, 3);
+            i = i + 3;
+            dev->work_buffer[i++] = PN532_TYPE_A_CASCADE_TAG;
+            memcpy(dev->work_buffer + i, uid.bytes + 3, 7);
+            i = i + 7;
+          }
+
+          default:
+          {
+            ctlserr("Invalid target (cascade) UID length");
+            return -EINVAL;
+          }
+        }
+    }
+
+  /* Start scan */
+
+  enum pn532_error_e err;
+  err = pn532_send_command(dev, dev->work_buffer, i,
+    NULL, 0, PN532_NO_TIMEOUT);
+
+  if (err != PN532_OK)
+    {
+      return -EIO;
+    }
+
+  ctlsinfo("Scan started");
+
+  return OK;
+}
+
+int pn532_ioctl_scan(struct pn532_dev_s *dev,
+                     struct ctls_scan_params_s *params)
+{
+  enum ctls_card_type_e type = params->type;
+
+  /* New card types can be introduced here */
+
+  switch (type)
+    {
+      case CTLS_CARD_MIFARE_TYPE_A:
+      {
+        return pn532_scan_type_a(dev, params);
+      }
+
+      default:
+      {
+        ctlserr("Card type not supported");
+        return -ENOTSUP;
+      }
+    }
+
+  return OK;
+}
+
+int pn532_ioctl_poll_status(struct pn532_dev_s *dev, enum ctls_status_e *status)
+{
+  enum pn532_error_e ret = pn532_get_status(dev);
+  switch (ret)
+    {
+      case PN532_OK:
+      {
+        dev->status = CTLS_STATUS_RESULT_READY;
+        break;
+      }
+
+      case PN532_BUSY:
+      {
+        dev->status = CTLS_STATUS_SCANNING;
+        break;
+      }
+
+      default:
+      {
+        dev->status = CTLS_STATUS_ERROR;
+        (*status) = dev->status;
+        return -EIO;
+      }
+    }
+
+  (*status) = dev->status;
+  return OK;
+}
+
+int pn532_get_results(struct pn532_dev_s *dev,
+                      struct ctls_scan_result_s *results)
+{
+  return OK;
 }
 
 /* SPI wrappers *************************************************************/
@@ -442,12 +670,13 @@ static void pn532_spi_end(FAR struct pn532_dev_s *dev)
  *
  ****************************************************************************/
 
-static uint8_t pn532_spi_get_status(FAR struct pn532_dev_s *dev)
+static enum pn532_error_e pn532_spi_get_status(FAR struct pn532_dev_s *dev)
 {
-  /* ! This function requires a bus lock and select */
-
+  pn532_spi_start(dev);
   pn532_spi_send(dev->spi, PN532_FR_STATREAD);
   uint8_t status = pn532_spi_send(dev->spi, 0x00);
+  pn532_spi_end(dev);
+
   if (status & 0x01)
     {
       return PN532_OK;
@@ -551,7 +780,7 @@ static enum pn532_error_e pn532_spi_get_ack(FAR struct pn532_dev_s *dev)
 
 static enum pn532_error_e pn532_spi_get_frame(FAR struct pn532_dev_s *dev,
                                               FAR uint8_t *answer,
-                                              uint8_t answer_len)
+                                              uint8_t *answer_len)
 {
   /* ! This function requires a bus lock and select */
 
@@ -613,11 +842,13 @@ static enum pn532_error_e pn532_spi_get_frame(FAR struct pn532_dev_s *dev,
    * Therefore len-1, removing the TFI from the equation.
    */
 
-  if (len - 1 > answer_len)
+  if (len - 1 > (*answer_len))
     {
       ctlserr("Frame data does not fit in user buffer");
       return PN532_MEMORY;
     }
+
+  (*answer_len) = len;
 
   /* Transfer data and calculate checksum */
 
@@ -736,13 +967,9 @@ static enum pn532_error_e pn532_spi_wait_rdy(FAR struct pn532_dev_s *dev,
     {
       /* Lock only during polling. Allows bus sharing */
 
-      pn532_spi_start(dev);
-
       /* Poll */
 
       enum pn532_error_e ret = pn532_spi_get_status(dev);
-
-      pn532_spi_end(dev);
 
       /* Device busy */
 
@@ -761,7 +988,6 @@ static enum pn532_error_e pn532_spi_wait_rdy(FAR struct pn532_dev_s *dev,
     {
       ctlserr("Timed out waiting for ready status");
     }
-
 
   return PN532_TIMEOUT;
 
@@ -788,10 +1014,17 @@ static enum pn532_error_e pn532_spi_send_cmd(FAR struct pn532_dev_s *dev,
                                       FAR uint8_t *params,
                                       size_t params_size,
                                       FAR uint8_t *answer,
-                                      size_t answer_size,
+                                      uint8_t *answer_size,
                                       uint32_t timeout_ms)
 {
   enum pn532_error_e ret = 0;
+
+  /* Skip command if params is NULL */
+
+  if (params == NULL)
+    {
+      goto skip_command;
+    }
 
   /* Send command */
 
@@ -838,6 +1071,15 @@ static enum pn532_error_e pn532_spi_send_cmd(FAR struct pn532_dev_s *dev,
 
   pn532_spi_end(dev);
 
+skip_command:
+
+  /* Skip answer if answer* is NULL */
+
+  if (answer == NULL)
+    {
+      return ret;
+    }
+
   /* Wait for ready */
 
   ret = pn532_spi_wait_rdy(dev, timeout_ms, false);
@@ -873,15 +1115,17 @@ frame_exit:
  * Description:
  *   Sends a command over the configured interface.
  *   This is the top level function for controlling the device.
+ *   Skip getting answer by giving a NULL as *answer.
+ *   Skip sending command by giving NULL as *params
  *
  ****************************************************************************/
 
 static enum pn532_error_e pn532_send_command(FAR struct pn532_dev_s *dev,
-                                      FAR uint8_t *params,
-                                      size_t params_size,
-                                      FAR uint8_t *answer,
-                                      size_t answer_size,
-                                      uint32_t timeout_ms)
+                                            FAR uint8_t *params,
+                                            size_t params_size,
+                                            FAR uint8_t *answer,
+                                            uint8_t *answer_size,
+                                            uint32_t timeout_ms)
 {
   enum pn532_error_e err;
 
@@ -898,6 +1142,21 @@ static enum pn532_error_e pn532_send_command(FAR struct pn532_dev_s *dev,
 #endif
 
   return err;
+}
+
+static enum pn532_error_e pn532_get_status(FAR struct pn532_dev_s *dev)
+{
+  enum pn532_error_e ret;
+
+  /* Other interface support can be added here */
+
+  /* SPI interface */
+
+#if PN532_IF_SPI == 1
+  ret = pn532_spi_get_status(dev);
+#endif
+
+  return ret;
 }
 
 /* Commands *****************************************************************/
@@ -927,9 +1186,10 @@ static enum pn532_error_e pn532_samconfig(FAR struct pn532_dev_s *dev,
   };
 
   uint8_t ans[1];
+  uint8_t answer_len = sizeof(ans);
 
   ret = pn532_send_command(dev, params, sizeof(params),
-             ans, sizeof(ans),
+             ans, &answer_len,
              PN532_TIMEOUT_MS_DEFAULT);
 
   return ret;
@@ -948,9 +1208,11 @@ static enum pn532_error_e
 pn532_in_list_pasv_tgt(FAR struct pn532_dev_s *dev,
                        uint8_t max_targets,
                        enum pn532_baudmod_e baudmod,
-                       uint8_t *initiator_data,
+                       FAR uint8_t *initiator_data,
                        size_t data_len,
-                       uint32_t timeout_ms)
+                       uint32_t timeout_ms,
+                       FAR struct pn532_card_s *cards,
+                       FAR uint8_t *cards_detected)
 {
   enum pn532_error_e ret;
 
@@ -975,15 +1237,27 @@ pn532_in_list_pasv_tgt(FAR struct pn532_dev_s *dev,
   memcpy(dev->work_buffer, params, sizeof(params));
   memcpy(dev->work_buffer + sizeof(params), initiator_data, data_len);
 
+  uint8_t answer_len = sizeof(dev->work_buffer);
+
   ret = pn532_send_command(dev, dev->work_buffer, totalsize,
-                           dev->work_buffer, sizeof(dev->work_buffer),
+                           dev->work_buffer, &answer_len,
                            timeout_ms);
+  if (ret != PN532_OK)
+    {
+      return ret;
+    }
 
   /* Get answer ... */
 
   ctlsinfo("Detection");
 
-  return ret;
+  /* Parse data */
+
+  return pn532_parse_cards(max_targets,
+                           baudmod,
+                           dev->work_buffer,
+                           answer_len,
+                           cards, cards_detected);
 }
 
 /****************************************************************************

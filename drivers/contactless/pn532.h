@@ -34,6 +34,7 @@
 #include <nuttx/spi/spi.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/contactless/pn532.h>
+#include <nuttx/contactless/ioctl.h>
 
 /****************************************************************************
  * Pre-Processor Definitions
@@ -115,6 +116,10 @@
 
 #define PN532_COMMAND_INLISTPASSIVETARGET_PARAMS 3
 
+/* Constants */
+
+#define PN532_TYPE_A_CASCADE_TAG                 0x88
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -125,6 +130,11 @@ struct pn532_dev_s
   FAR struct pn532_config_s *config;  /* Board configuration data */
   uint8_t active;
   uint8_t work_buffer[PN532_WORKBUFFER_SIZE];
+  enum ctls_status_e status;
+
+  /* Card params */
+
+  struct ctls_type_a_params_s type_a_params;
 };
 
 enum pn532_error_e
@@ -135,16 +145,8 @@ enum pn532_error_e
   PN532_CHECKSUM_FAIL,
   PN532_BUSY,
   PN532_UNEXPECTED,
-  PN532_MEMORY
-};
-
-enum pn532_baudmod_e
-{
-  PN532_BAUDMOD_TYPE_A_106K,
-  PN532_BAUDMOD_FELICA_212K,
-  PN532_BAUDMOD_FELICA_424K,
-  PN532_BAUDMOD_TYPE_B_106K,
-  PN532_BAUDMOD_JEWEL_106K
+  PN532_MEMORY,
+  PN532_UNSUPPORTED_CARD
 };
 
 /****************************************************************************

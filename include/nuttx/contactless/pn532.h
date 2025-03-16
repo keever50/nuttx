@@ -38,7 +38,11 @@
  * Pre-Processor Definitions
  ****************************************************************************/
 
-#define PN532_NO_TIMEOUT                (0x00)
+#define PN532_NO_TIMEOUT                  (0x00)
+#define PN532_MAX_FRAME_LENGTH            64
+#define PN532_MIFARE_A_MAX_UID_LEN        7
+#define PN532_MIFARE_B_MAX_ATTRIBUTE_LEN  12
+#define PN532_MAX_CARDS_ONE_SCAN          2
 
 /****************************************************************************
  * Public Types
@@ -61,6 +65,52 @@ enum pn532_sam_e
   PN532_SAM_VIRTUAL,
   PN532_SAM_WIRED,
   PN532_SAM_DUAL
+};
+
+/* Cards */
+
+/* This can also be used for card type */
+
+enum pn532_baudmod_e
+{
+  PN532_BAUDMOD_TYPE_A_106K,
+  PN532_BAUDMOD_FELICA_212K,
+  PN532_BAUDMOD_FELICA_424K,
+  PN532_BAUDMOD_TYPE_B_106K,
+  PN532_BAUDMOD_JEWEL_106K
+};
+
+struct pn532_card_mifare_a_s
+{
+  uint8_t sens_res[2];
+  uint8_t sel_res;
+  uint8_t uid_len;
+  uint8_t uid[PN532_MIFARE_A_MAX_UID_LEN];
+};
+
+struct pn532_card_mifare_b_s
+{
+  uint8_t atqb[12];
+  uint8_t attrib_len;
+  uint8_t attributes[PN532_MIFARE_B_MAX_ATTRIBUTE_LEN];
+};
+
+union pn532_card_info_u
+{
+  /* PN532_BAUDMOD_TYPE_A_106K */
+
+  struct pn532_card_mifare_a_s mifare_a;
+
+  /* PN532_BAUDMOD_TYPE_B_106K */
+
+  struct pn532_card_mifare_b_s mifare_b;
+};
+
+struct pn532_card_s
+{
+  enum pn532_baudmod_e type;
+  uint8_t target_nr;
+  union pn532_card_info_u info;
 };
 
 /****************************************************************************
