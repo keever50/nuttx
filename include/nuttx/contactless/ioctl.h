@@ -245,6 +245,10 @@ struct ctls_card_s
 
 struct ctls_scan_result_s
 {
+  /* Maximum time to wait for result */
+
+  uint32_t timeout_ms;
+
   /* Cards detected in once scan
    * Written by scanner
    */

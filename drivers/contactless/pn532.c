@@ -66,13 +66,13 @@
 
 /* ioctl */
 
-int pn532_ioctl_scan(struct pn532_dev_s *dev,
-  struct ctls_scan_params_s *params);
+int pn532_ioctl_scan(FAR struct pn532_dev_s *dev,
+  FAR struct ctls_scan_params_s *params);
 
-int pn532_ioctl_poll_status(struct pn532_dev_s *dev, enum ctls_status_e *status);
+int pn532_ioctl_poll_status(FAR struct pn532_dev_s *dev, FAR enum ctls_status_e *status);
 
-int pn532_get_results(struct pn532_dev_s *dev,
-  struct ctls_scan_result_s *results);
+int pn532_get_results(FAR struct pn532_dev_s *dev,
+  FAR struct ctls_scan_result_s *results);
 
 /* SPI control */
 
@@ -345,21 +345,26 @@ static int pn532_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
   switch (cmd)
     {
     case CLIOC_TYPE_A_SET_PARAMS:
-    {
-      memcpy(&dev->type_a_params, (struct ctls_type_a_params_s *)arg,
-      sizeof(dev->type_a_params));
-      return OK;
-    }
+      {
+        memcpy(&dev->type_a_params, (struct ctls_type_a_params_s *)arg,
+        sizeof(dev->type_a_params));
+        return OK;
+      }
 
     case CLIOC_SCAN:
-    {
-      return pn532_ioctl_scan(dev, (struct ctls_scan_params_s *)arg);
-    }
+      {
+        return pn532_ioctl_scan(dev, (struct ctls_scan_params_s *)arg);
+      }
 
     case CLIOC_POLL_STATUS:
-    {
-      return pn532_ioctl_poll_status(dev, (enum ctls_status_e *)arg);
-    }
+      {
+        return pn532_ioctl_poll_status(dev, (enum ctls_status_e *)arg);
+      }
+
+    case CLIOC_GET_RESULTS:
+      {
+        return pn532_get_results(dev, (struct ctls_scan_result_s *)arg);
+      }
 
     default:
       ctlserr("Unexpected ioctl cmd: 0x%X\n", cmd);
@@ -443,8 +448,8 @@ int pn532_scan_type_a(struct pn532_dev_s *dev,
   return OK;
 }
 
-int pn532_ioctl_scan(struct pn532_dev_s *dev,
-                     struct ctls_scan_params_s *params)
+int pn532_ioctl_scan(FAR struct pn532_dev_s *dev,
+                     FAR struct ctls_scan_params_s *params)
 {
   enum ctls_card_type_e type = params->type;
 
@@ -467,7 +472,8 @@ int pn532_ioctl_scan(struct pn532_dev_s *dev,
   return OK;
 }
 
-int pn532_ioctl_poll_status(struct pn532_dev_s *dev, enum ctls_status_e *status)
+int pn532_ioctl_poll_status(FAR struct pn532_dev_s *dev,
+                            FAR enum ctls_status_e *status)
 {
   enum pn532_error_e ret = pn532_get_status(dev);
   switch (ret)
@@ -496,9 +502,33 @@ int pn532_ioctl_poll_status(struct pn532_dev_s *dev, enum ctls_status_e *status)
   return OK;
 }
 
-int pn532_get_results(struct pn532_dev_s *dev,
-                      struct ctls_scan_result_s *results)
+int pn532_get_results(FAR struct pn532_dev_s *dev,
+                      FAR struct ctls_scan_result_s *results)
 {
+  enum pn532_error_e err;
+
+  uint8_t answer_size = sizeof(dev->work_buffer);
+  err = pn532_send_command(dev, NULL, 0, dev->work_buffer,
+                           &answer_size,
+                           results->timeout_ms);
+  switch (err)
+    {
+      case PN532_TIMEOUT:
+        {
+          return -ETIME;
+        }
+      case PN532_OK:
+        {
+          break;
+        }
+      default:
+        {
+          return -EIO;
+        }
+    }
+
+
+  
   return OK;
 }
 
