@@ -39,68 +39,47 @@
 #define MFRC522IOC_GET_PICC_UID         _CLIOC(0x0001)
 #define MFRC522IOC_GET_STATE            _CLIOC(0x0002)
 
-/* PN532 IOCTL Commands *****************************************************/
-
-#define PN532IOC_SET_SAM_CONF           _CLIOC(0x0003)
-#define PN532IOC_READ_PASSIVE           _CLIOC(0x0004)
-#define PN532IOC_SET_RF_CONF            _CLIOC(0x0005)
-#define PN532IOC_SEND_CMD_READ_PASSIVE  _CLIOC(0x0006)
-#define PN532IOC_GET_DATA_READY         _CLIOC(0x0007)
-#define PN532IOC_GET_TAG_ID             _CLIOC(0x0008)
-#define PN532IOC_GET_STATE              _CLIOC(0x0009)
-#define PN532IOC_READ_TAG_DATA          _CLIOC(0x000a)
-#define PN532IOC_WRITE_TAG_DATA         _CLIOC(0x000b)
-
 /* Contactless common IOCTL Commands ****************************************/
-
-/* Note about [Placeholder]
- * These are not yet implemented and exist to be changed.
- * But gives an example how and where to implement new features
- */
 
 /* Legacy */
 
-#define CLIOC_READ_MIFARE_DATA          _CLIOC(0x000c)
-#define CLIOC_WRITE_MIFARE_DATA         _CLIOC(0x000d)
+#define CLIOC_READ_MIFARE_DATA          _CLIOC(0x0003)
+#define CLIOC_WRITE_MIFARE_DATA         _CLIOC(0x0004)
 
 /* Card mifare type A parameters */
 
-#define CLIOC_TYPE_A_SET_PARAMS         _CLIOC(0x000e) /* arg: ptr to struct ctls_type_a_params_s
+#define CLIOC_TYPE_A_SET_PARAMS         _CLIOC(0x0005) /* arg: ptr to struct ctls_type_a_params_s
                                                         * Configures the card params before scanning */
 
-/* Card mifare type B parameters
- * [Placeholder]
- */
+/* Card mifare type B parameters [Experimental] */
 
-#define CLIOC_TYPE_B_SET_PARAMS         _CLIOC(0x000f) /* arg: ptr to struct ctls_type_b_params_s
+#define CLIOC_TYPE_B_SET_PARAMS         _CLIOC(0x0006) /* arg: ptr to struct ctls_type_b_params_s
                                                         * Configures the card params before scanning */
 
 /* Scan mode */
 
-#define CLIOC_SCAN                      _CLIOC(0x0010) /* Starts scanning with ptr to struct ctls_scan_params_s */
+#define CLIOC_SCAN                      _CLIOC(0x0007) /* Starts scanning with ptr to struct ctls_scan_params_s */
 
-#define CLIOC_AUTO_SCAN                 _CLIOC(0x0011) /* Starts scanning with ptr to struct ctls_auto_params_s */
+#define CLIOC_AUTO_SCAN                 _CLIOC(0x0008) /* Starts scanning with ptr to struct ctls_auto_params_s */
 
 /* Polling */
 
-#define CLIOC_POLL_STATUS               _CLIOC(0x0012) /* arg: ptr to enum ctls_status_e */
+#define CLIOC_POLL_STATUS               _CLIOC(0x0009) /* arg: ptr to enum ctls_status_e */
 
 /* Get results */
 
-#define CLIOC_GET_RESULTS               _CLIOC(0x0013) /* Returns cards into ptr to struct ctls_scan_result_s
+#define CLIOC_GET_RESULTS               _CLIOC(0x000a) /* Returns cards into ptr to struct ctls_scan_result_s
                                                         * This is a blocking function if scanner is scanning.
                                                         * To avoid blocking, check POLL_STATUS for CTLS_STATUS_RESULT_READY */
-
-/* Constants */
-
-#define CLIOC_MAX_UID_SIZE  16
-#define CTLS_TYPE_B_ATTRIB_MAX_LEN 32
 
 /****************************************************************************
  * Public Types
  ****************************************************************************/
 
-/* --- Start of common --- */
+/* Constants */
+
+#define CLIOC_MAX_UID_SIZE  16
+#define CTLS_TYPE_B_ATTRIB_MAX_LEN 32
 
 /* Common data **************************************************************/
 
@@ -120,12 +99,6 @@ struct ctls_uid_s
   uint8_t bytes[CLIOC_MAX_UID_SIZE];
 };
 
-enum ctls_type_b_polling_e
-{
-  CTLS_TYPE_B_TIMESLOT = 0x00,
-  CTLS_TYPE_B_PROBABILISTIC = 0x01
-};
-
 enum ctls_card_type_e
 {
   CTLS_CARD_NONE,     /* This card is not scanned */
@@ -137,18 +110,28 @@ enum ctls_card_type_e
 
 /* Common: Card params ******************************************************/
 
+/* Card Mifare type A */
+
 struct ctls_type_a_params_s
 {
   /* Optional field:
-   * Enabled only when the host controller
-   * wants to initialize a target with a known UID.
+   * When enabled, only cards with the target_uid
+   * will be scanned. Others will be ignored.
    */
 
   bool enable_target_uid;
   struct ctls_uid_s target_uid;
 };
 
-struct ctls_type_b_params_s /* [Placeholder] */
+/* Card Mifare type B [Experimental] */
+
+enum ctls_type_b_polling_e
+{
+  CTLS_TYPE_B_TIMESLOT      = 0x00,
+  CTLS_TYPE_B_PROBABILISTIC = 0x01
+};
+
+struct ctls_type_b_params_s
 {
   /* Mandatory field:
    * Application Familly Identifier
@@ -194,6 +177,8 @@ struct ctls_auto_params_s
 
 /* Common: Card types *******************************************************/
 
+/* Mifare type A */
+
 struct ctls_card_type_a_s
 {
   /* The following fields are for multi scan results */
@@ -209,6 +194,8 @@ struct ctls_card_type_a_s
 
   /* ATS should be implemented here */
 };
+
+/* Mifare type B [Experimental] */
 
 struct ctls_card_type_b_s
 {
@@ -231,6 +218,8 @@ union ctls_card_u
   struct ctls_card_type_a_s type_a;
   struct ctls_card_type_b_s type_b;
 };
+
+/* Holds a union card and the type of card within */
 
 struct ctls_card_s
 {
@@ -266,9 +255,7 @@ struct ctls_scan_result_s
   struct ctls_card_s *cards;
 };
 
-/* --- End of common --- */
-
-/* PICC */
+/* legacy: PICC */
 
 struct picc_uid_s
 {

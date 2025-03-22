@@ -38,27 +38,12 @@
 #include <sys/time.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
-#include <nuttx/power/pm.h>
 #include <endian.h>
 #include "pn532.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-/* Configuration ************************************************************/
-
-#ifdef CONFIG_CL_PN532_DEBUG_TX
-#  define tracetx errdumpbuffer
-#else
-#    define tracetx(x...)
-#endif
-
-#ifdef CONFIG_CL_PN532_DEBUG_RX
-#  define tracerx errdumpbuffer
-#else
-#    define tracerx(x...)
-#endif
 
 /****************************************************************************
  * Private Function Prototypes
@@ -228,7 +213,7 @@ static ssize_t pn532_read(FAR struct file *filep,
 
   UNUSED(dev);
 
-  return -EIO;
+  return -ENOTSUP;
 }
 
 static ssize_t pn532_write(FAR struct file *filep, FAR const char *buffer,
@@ -244,7 +229,7 @@ static ssize_t pn532_write(FAR struct file *filep, FAR const char *buffer,
 
   UNUSED(dev);
 
-  return -ENOSYS;
+  return -ENOTSUP;
 }
 
 static int pn532_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
@@ -461,14 +446,17 @@ int pn532_get_results(FAR struct pn532_dev_s *dev,
 
   if (maxcards > PN532_MAX_CARDS_SUPPORTED)
     {
-      ctlsinfo("Max cards at once limited to PN532 maximum %d", PN532_MAX_CARDS_SUPPORTED);
+      ctlsinfo("Max cards at once limited to PN532 maximum %d",
+               PN532_MAX_CARDS_SUPPORTED);
       maxcards = PN532_MAX_CARDS_SUPPORTED;
     }
 
   /* Parse results */
 
   struct pn532_card_s cards[PN532_MAX_CARDS_SUPPORTED];
-  err = pn532_parse_cards(maxcards, dev->current_baudmod, dev->work_buffer, answer_size, cards, &cards_detected);
+  err = pn532_parse_cards(maxcards, dev->current_baudmod,
+                          dev->work_buffer, answer_size,
+                          cards, &cards_detected);
   if (err != PN532_OK)
     {
       ctlserr("Parsing error");
