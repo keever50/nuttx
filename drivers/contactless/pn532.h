@@ -45,6 +45,7 @@
 #define PN532_SPI_ID  0
 
 #define PN532_WORKBUFFER_SIZE               128
+#define PN532_MAX_CARDS_SUPPORTED           2
 
 /* Timings ******************************************************************/
 
@@ -131,6 +132,8 @@ struct pn532_dev_s
   uint8_t active;
   uint8_t work_buffer[PN532_WORKBUFFER_SIZE];
   enum ctls_status_e status;
+  enum pn532_baudmod_e current_baudmod;
+  enum ctls_card_type_e current_type;
 
   /* Card params */
 

@@ -69,7 +69,8 @@
 int pn532_ioctl_scan(FAR struct pn532_dev_s *dev,
   FAR struct ctls_scan_params_s *params);
 
-int pn532_ioctl_poll_status(FAR struct pn532_dev_s *dev, FAR enum ctls_status_e *status);
+int pn532_ioctl_poll_status(FAR struct pn532_dev_s *dev,
+                            FAR enum ctls_status_e *status);
 
 int pn532_get_results(FAR struct pn532_dev_s *dev,
   FAR struct ctls_scan_result_s *results);
@@ -129,103 +130,18 @@ pn532_in_list_pasv_tgt(FAR struct pn532_dev_s *dev,
 
 /* Parsing */
 
-// SHOULD BE PROTOTYPES
-
 static enum pn532_error_e pn532_parse_type_a(uint8_t max_cards,
                         FAR uint8_t *data,
                         size_t data_len,
                         FAR struct pn532_card_s *output_cards,
-                        FAR uint8_t *cards_detected)
-{
-  const size_t max_card_len = sizeof(union pn532_card_info_u);
-  size_t i = 0;
-
-  for (size_t c = 0; c < (*cards_detected); c++)
-    {
-      /* Get output card */
-
-      FAR struct pn532_card_s *card = &(output_cards[c]);
-
-      /* Parse */
-
-      card->target_nr                 = data[i++];
-      card->type                      = PN532_BAUDMOD_TYPE_A_106K;
-      card->info.mifare_a.sens_res[0] = data[i++];
-      card->info.mifare_a.sens_res[1] = data[i++];
-      card->info.mifare_a.sel_res     = data[i++];
-      size_t uid_len                  = data[i++];
-
-      /* Parse UID */
-
-      card->info.mifare_a.uid_len = uid_len;
-      ctlsinfo("UID dump:");
-      for (size_t ui = 0; ui < uid_len; ui++)
-        {
-          uint8_t n = data[i++];
-          card->info.mifare_a.uid[ui] = n;
-          ctlsinfo("0x%X", n);
-        }
-      ctlsinfo("End UID dump");
-
-      /* ATS, not implemented. Should be here if its enabled */
-    }
-
-  return PN532_OK;
-}
+                        FAR uint8_t *cards_detected);
 
 static enum pn532_error_e pn532_parse_cards(uint8_t max_cards,
                         enum pn532_baudmod_e type,
                         FAR uint8_t *data,
                         uint8_t data_len,
                         FAR struct pn532_card_s *output_cards,
-                        FAR uint8_t *cards_detected)
-{
-  /* Dump card */
-
-  ctlsinfo("Card info dump: ");
-  for (size_t d = 0; d < data_len; d++)
-    {
-      ctlsinfo("0x%X", data[d]);
-    }
-  ctlsinfo("End info dump");
-
-  /* First two bytes are frame idents */
-
-  /* Check if this is parsable data
-   * [d5][4b][nbtg][data1][data2]
-   */
-
-  size_t i = 0;
-  if (data[i++] != 0x4b)
-    {
-      ctlserr("Parsing error. Incorrect data start byte");
-      return PN532_UNEXPECTED;
-    }
-
-  /* Number of targets */
-
-  (*cards_detected) = data[i++];
-  ctlsinfo("%d Card/s detected", (*cards_detected));
-
-  /* Parsing is card dependend from here */
-
-  switch (type)
-    {
-      case PN532_BAUDMOD_TYPE_A_106K:
-      {
-        return pn532_parse_type_a(max_cards, data + i,
-          data_len - i, output_cards, cards_detected);
-      }
-
-      default:
-      {
-        ctlserr("Parsing error. Unsupported card");
-        return PN532_UNSUPPORTED_CARD;
-      }
-    }
-
-  return PN532_OK;
-}
+                        FAR uint8_t *cards_detected);
 
 /****************************************************************************
  * Private Data
@@ -385,12 +301,14 @@ int pn532_scan_type_a(struct pn532_dev_s *dev,
 
   size_t i = 0;
   uint8_t max_targets = params->max_at_once;
+  dev->current_baudmod = PN532_BAUDMOD_TYPE_A_106K;
+  dev->current_type = params->type;
 
   /* Program work buffer */
 
   dev->work_buffer[i++] = PN532_COMMAND_INLISTPASSIVETARGET;
   dev->work_buffer[i++] = max_targets;
-  dev->work_buffer[i++] = PN532_BAUDMOD_TYPE_A_106K;
+  dev->work_buffer[i++] = dev->current_baudmod;
 
   /* UID target enabled */
 
@@ -507,28 +425,107 @@ int pn532_get_results(FAR struct pn532_dev_s *dev,
 {
   enum pn532_error_e err;
 
+  /* Get results. There is no command, because we get
+   * the answer from the previous sent command
+   */
+
   uint8_t answer_size = sizeof(dev->work_buffer);
   err = pn532_send_command(dev, NULL, 0, dev->work_buffer,
                            &answer_size,
                            results->timeout_ms);
+
+  /* Above is blocking, so a timeout is implemented and checked */
+
   switch (err)
     {
       case PN532_TIMEOUT:
         {
           return -ETIME;
         }
+
       case PN532_OK:
         {
           break;
         }
+
       default:
         {
           return -EIO;
         }
     }
 
+  /* Limit max cards and allow it */
 
-  
+  uint8_t maxcards = results->max_cards_results;
+  uint8_t cards_detected = 0;
+
+  if (maxcards > PN532_MAX_CARDS_SUPPORTED)
+    {
+      ctlsinfo("Max cards at once limited to PN532 maximum %d", PN532_MAX_CARDS_SUPPORTED);
+      maxcards = PN532_MAX_CARDS_SUPPORTED;
+    }
+
+  /* Parse results */
+
+  struct pn532_card_s cards[PN532_MAX_CARDS_SUPPORTED];
+  err = pn532_parse_cards(maxcards, dev->current_baudmod, dev->work_buffer, answer_size, cards, &cards_detected);
+  if (err != PN532_OK)
+    {
+      ctlserr("Parsing error");
+      return -EIO;
+    }
+
+  /* Fill in user results */
+
+  results->card_results = cards_detected;
+  for (size_t i = 0; i < cards_detected; i++)
+    {
+      /* Translate driver data to user data.
+       * FUTURE: It is a good idea to parse user data directly.
+       * Parsing was made before the common IOCTL API
+       */
+
+      results->cards[i].type = dev->current_type;
+
+      switch (dev->current_type)
+        {
+          case CTLS_CARD_MIFARE_TYPE_A:
+          {
+            /* Translate CTLS_CARD_MIFARE_TYPE_A */
+
+            results->cards[i].info.type_a.sel_res =
+              cards[i].info.mifare_a.sel_res;
+
+            results->cards[i].info.type_a.sens_res[0] =
+              cards[i].info.mifare_a.sens_res[0];
+
+            results->cards[i].info.type_a.sens_res[1] =
+              cards[i].info.mifare_a.sens_res[1];
+
+            results->cards[i].info.type_a.target_id =
+              cards[i].target_nr;
+
+            results->cards[i].info.type_a.valid = true;
+
+            /* UID */
+
+            memcpy(results->cards[i].info.type_a.uid.bytes,
+                  cards[i].info.mifare_a.uid,
+                  cards[i].info.mifare_a.uid_len);
+            results->cards[i].info.type_a.uid.size =
+              cards[i].info.mifare_a.uid_len;
+
+            break;
+          }
+
+          default:
+          {
+            ctlserr("Tried to parse unsupported card type");
+            return -EIO;
+          }
+        }
+    }
+
   return OK;
 }
 
@@ -1223,6 +1220,106 @@ static enum pn532_error_e pn532_samconfig(FAR struct pn532_dev_s *dev,
              PN532_TIMEOUT_MS_DEFAULT);
 
   return ret;
+}
+
+/* Parsing ******************************************************************/
+
+static enum pn532_error_e pn532_parse_type_a(uint8_t max_cards,
+                                    FAR uint8_t *data,
+                                    size_t data_len,
+                                    FAR struct pn532_card_s *output_cards,
+                                    FAR uint8_t *cards_detected)
+{
+  const size_t max_card_len = sizeof(union pn532_card_info_u);
+  size_t i = 0;
+
+  for (size_t c = 0; c < (*cards_detected); c++)
+    {
+      /* Get output card */
+
+      FAR struct pn532_card_s *card = &(output_cards[c]);
+
+      /* Parse */
+
+      card->target_nr                 = data[i++];
+      card->type                      = PN532_BAUDMOD_TYPE_A_106K;
+      card->info.mifare_a.sens_res[0] = data[i++];
+      card->info.mifare_a.sens_res[1] = data[i++];
+      card->info.mifare_a.sel_res     = data[i++];
+      size_t uid_len                  = data[i++];
+
+      /* Parse UID */
+
+      card->info.mifare_a.uid_len = uid_len;
+      ctlsinfo("UID dump:");
+      for (size_t ui = 0; ui < uid_len; ui++)
+        {
+          uint8_t n = data[i++];
+          card->info.mifare_a.uid[ui] = n;
+          ctlsinfo("0x%X", n);
+        }
+
+      ctlsinfo("End UID dump");
+
+      /* ATS, not implemented. Should be here if its enabled */
+    }
+
+  return PN532_OK;
+}
+
+static enum pn532_error_e pn532_parse_cards(uint8_t max_cards,
+                                      enum pn532_baudmod_e type,
+                                      FAR uint8_t *data,
+                                      uint8_t data_len,
+                                      FAR struct pn532_card_s *output_cards,
+                                      FAR uint8_t *cards_detected)
+{
+  /* Dump card */
+
+  ctlsinfo("Card info dump: ");
+  for (size_t d = 0; d < data_len; d++)
+    {
+      ctlsinfo("0x%X", data[d]);
+    }
+
+  ctlsinfo("End info dump");
+
+  /* First two bytes are frame idents */
+
+  /* Check if this is parsable data
+   * [d5][4b][nbtg][data1][data2]
+   */
+
+  size_t i = 0;
+  if (data[i++] != 0x4b)
+    {
+      ctlserr("Parsing error. Incorrect data start byte");
+      return PN532_UNEXPECTED;
+    }
+
+  /* Number of targets */
+
+  (*cards_detected) = data[i++];
+  ctlsinfo("%d Card/s detected", (*cards_detected));
+
+  /* Parsing is card dependend from here */
+
+  switch (type)
+    {
+    case PN532_BAUDMOD_TYPE_A_106K:
+      {
+        return pn532_parse_type_a(max_cards, data + i,
+        data_len - i, output_cards, cards_detected);
+      }
+
+    default:
+      {
+        ctlserr("Parsing error. Unsupported card");
+        return PN532_UNSUPPORTED_CARD;
+      }
+    }
+
+  return PN532_OK;
 }
 
 /****************************************************************************
