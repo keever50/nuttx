@@ -39,36 +39,48 @@
 #define MFRC522IOC_GET_PICC_UID         _CLIOC(0x0001)
 #define MFRC522IOC_GET_STATE            _CLIOC(0x0002)
 
+/* PN532 IOCTL Commands *****************************************************/
+
+#define PN532IOC_SET_SAM_CONF           _CLIOC(0x0003)
+#define PN532IOC_READ_PASSIVE           _CLIOC(0x0004)
+#define PN532IOC_SET_RF_CONF            _CLIOC(0x0005)
+#define PN532IOC_SEND_CMD_READ_PASSIVE  _CLIOC(0x0006)
+#define PN532IOC_GET_DATA_READY         _CLIOC(0x0007)
+#define PN532IOC_GET_TAG_ID             _CLIOC(0x0008)
+#define PN532IOC_GET_STATE              _CLIOC(0x0009)
+#define PN532IOC_READ_TAG_DATA          _CLIOC(0x000a)
+#define PN532IOC_WRITE_TAG_DATA         _CLIOC(0x000b)
+
 /* Contactless common IOCTL Commands ****************************************/
 
 /* Legacy */
 
-#define CLIOC_READ_MIFARE_DATA          _CLIOC(0x0003)
-#define CLIOC_WRITE_MIFARE_DATA         _CLIOC(0x0004)
+#define CLIOC_READ_MIFARE_DATA          _CLIOC(0x000c)
+#define CLIOC_WRITE_MIFARE_DATA         _CLIOC(0x000d)
 
 /* Card mifare type A parameters */
 
-#define CLIOC_TYPE_A_SET_PARAMS         _CLIOC(0x0005) /* arg: ptr to struct ctls_type_a_params_s
+#define CLIOC_TYPE_A_SET_PARAMS         _CLIOC(0x000e) /* arg: ptr to struct ctls_type_a_params_s
                                                         * Configures the card params before scanning */
 
 /* Card mifare type B parameters [Experimental] */
 
-#define CLIOC_TYPE_B_SET_PARAMS         _CLIOC(0x0006) /* arg: ptr to struct ctls_type_b_params_s
+#define CLIOC_TYPE_B_SET_PARAMS         _CLIOC(0x000f) /* arg: ptr to struct ctls_type_b_params_s
                                                         * Configures the card params before scanning */
 
 /* Scan mode */
 
-#define CLIOC_SCAN                      _CLIOC(0x0007) /* Starts scanning with ptr to struct ctls_scan_params_s */
+#define CLIOC_SCAN                      _CLIOC(0x0010) /* Starts scanning with ptr to struct ctls_scan_params_s */
 
-#define CLIOC_AUTO_SCAN                 _CLIOC(0x0008) /* Starts scanning with ptr to struct ctls_auto_params_s */
+#define CLIOC_AUTO_SCAN                 _CLIOC(0x0011) /* Starts scanning with ptr to struct ctls_auto_params_s */
 
 /* Polling */
 
-#define CLIOC_POLL_STATUS               _CLIOC(0x0009) /* arg: ptr to enum ctls_status_e */
+#define CLIOC_POLL_STATUS               _CLIOC(0x0012) /* arg: ptr to enum ctls_status_e */
 
 /* Get results */
 
-#define CLIOC_GET_RESULTS               _CLIOC(0x000a) /* Returns cards into ptr to struct ctls_scan_result_s
+#define CLIOC_GET_RESULTS               _CLIOC(0x0013) /* Returns cards into ptr to struct ctls_scan_result_s
                                                         * This is a blocking function if scanner is scanning.
                                                         * To avoid blocking, check POLL_STATUS for CTLS_STATUS_RESULT_READY */
 
