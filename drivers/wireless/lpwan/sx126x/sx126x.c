@@ -26,6 +26,7 @@
 
 #include "sx126x.h"
 
+#include <assert.h>
 #include <nuttx/arch.h>
 #include <nuttx/config.h>
 
@@ -294,6 +295,166 @@ static void sx126x_isr0_process(FAR void *arg);
  * Private Functions
  ****************************************************************************/
 
+/* IOCTL implementation */
+
+static int sx126x_ioctl_setmodu(FAR struct sx126x_dev_s *dev,
+                                enum wlioc_modulation_e modu)
+{
+  /* Currently only LoRa is supported */
+
+  switch (modu)
+    {
+      case WLIOC_LORA:
+        {
+          dev->packet_type = SX126X_PACKETTYPE_LORA;
+        }
+
+      default:
+        {
+          wlerr("Modulation not supported");
+          return -ENOTSUP;
+        }
+    }
+
+  return OK;
+}
+
+static int sx126x_ioctl_setbw(FAR struct sx126x_dev_s *dev, uint32_t hz)
+{
+  static const uint32_t possible_bws[] =
+  {
+    7000, 10000, 15000, 20000, 31000, 41000, 62000, 125000, 250000, 500000
+  };
+
+  uint32_t closest = UINT32_MAX;
+  uint32_t selected_bw = 0;
+  bool matched = false;
+
+  /* Compare bw with possible values */
+
+  for (size_t i = 0; i < sizeof(possible_bws) / sizeof(possible_bws[0]); i++)
+    {
+      /* Get distance */
+
+      uint32_t dist = abs((int32_t)hz - (int32_t)possible_bws[i]);
+
+      /* Check if we found a match */
+
+      if (dist == 0)
+        {
+          closest = 0;
+          selected_bw = possible_bws[i];
+          matched = true;
+          break;
+        }
+
+      /* Select current closest if we found one */
+
+      if (dist < closest)
+        {
+          closest = dist;
+          selected_bw = possible_bws[i];
+        }
+    }
+
+  if (!matched)
+    {
+      wlwarn("SX126x does not support the bandwidth %uHz. \
+             Used %dHz instead.",
+             hz, selected_bw);
+    }
+
+  /* Translate bandwidth to driver and
+   * allow custom behavior per bandwidth
+   */
+
+  switch (selected_bw)
+    {
+      case 7000:
+        {
+          dev->lora_bw = SX126X_LORA_BW_7;
+        }
+
+      case 10000:
+        {
+          dev->lora_bw = SX126X_LORA_BW_10;
+        }
+
+      case 15000:
+        {
+          dev->lora_bw = SX126X_LORA_BW_15;
+        }
+
+      case 20000:
+        {
+          dev->lora_bw = SX126X_LORA_BW_20;
+        }
+
+      case 31000:
+        {
+          dev->lora_bw = SX126X_LORA_BW_31;
+        }
+
+      case 41000:
+        {
+          dev->lora_bw = SX126X_LORA_BW_41;
+        }
+
+      case 62000:
+        {
+          dev->lora_bw = SX126X_LORA_BW_62;
+        }
+
+      case 125000:
+        {
+          dev->lora_bw = SX126X_LORA_BW_125;
+        }
+
+      case 250000:
+        {
+          dev->lora_bw = SX126X_LORA_BW_250;
+        }
+
+      case 500000:
+        {
+          /* TODO: BW over 250kHz needs the
+           * bandwidth peformance workaround
+           */
+
+          wlwarn("SX126x driver in the current version might not\
+                 perform optimal at bandwidths higher than 250kHz yet");
+          dev->lora_bw = SX126X_LORA_BW_500;
+        }
+
+      default:
+      {
+        /* We shouln't be able to get here */
+
+        return -EIO;
+      }
+    }
+
+  return OK;
+}
+
+int sx126x_ioctl_setcr(FAR struct sx126x_dev_s *dev,
+                       enum wlioc_lora_cr_e cr)
+{
+  /* Lookup table for translation */
+
+  enum sx126x_lora_cr_e crs[] =
+  {
+    SX126X_LORA_CR_4_5,
+    SX126X_LORA_CR_4_6,
+    SX126X_LORA_CR_4_7,
+    SX126X_LORA_CR_4_8
+  };
+
+  dev->lora_cr = crs[cr - 1];
+
+  return OK;
+}
+
 /* File operations **********************************************************/
 
 static int sx126x_open(FAR struct file *filep)
@@ -500,26 +661,28 @@ static ssize_t sx126x_write(FAR struct file *filep,
 
 static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 {
-  int ret = 0;
+  int ret = OK;
 
   /* Get device */
 
   struct sx126x_dev_s *dev;
   dev = filep->f_inode->i_private;
-  wlinfo("IOCTL cmd %d arg %u SX126x dev_number %d",
-    cmd,
-    *(FAR uint32_t *)((uintptr_t)arg),
-    dev->lower->dev_number);
+  // wlinfo("IOCTL cmd %d arg %u SX126x dev_number %d",
+  //   cmd,
+  //   *(FAR uint32_t *)((uintptr_t)arg),
+  //   dev->lower->dev_number);
+  wlinfo("test");
 
   /* Lock */
 
   ret = nxmutex_lock(&dev->lock);
   if (ret < 0)
     {
-      goto exit_err;
+      wlerr("Failed to lock driver");
+      return ret;
     }
 
-  /* Do thing */
+  /* Select the ioctl command */
 
   switch (cmd)
     {
@@ -527,10 +690,7 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
       case WLIOC_SETRADIOFREQ:
         {
-          FAR uint32_t *freq_ptr = (FAR uint32_t *)((uintptr_t)arg);
-          DEBUGASSERT(freq_ptr != NULL);
-
-          dev->frequency_hz = *freq_ptr;
+          dev->frequency_hz = *(FAR uint32_t *)((uintptr_t)arg);
           break;
         }
 
@@ -539,20 +699,15 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       case WLIOC_GETRADIOFREQ:
         {
           FAR uint32_t *freq_ptr = (FAR uint32_t *)((uintptr_t)arg);
-          DEBUGASSERT(freq_ptr != NULL);
-
            *freq_ptr = dev->frequency_hz;
-          break;
+           break;
         }
 
       /* Set TX power. arg: Pointer to int8_t power value */
 
       case WLIOC_SETTXPOWER:
         {
-          FAR int8_t *ptr = (FAR int8_t *)((uintptr_t)arg);
-          DEBUGASSERT(ptr != NULL);
-
-          dev->power = *ptr;
+          dev->power = *(FAR int8_t *)((uintptr_t)arg);
           break;
         }
 
@@ -561,13 +716,77 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       case WLIOC_GETTXPOWER:
         {
           FAR int8_t *ptr = (FAR int8_t *)((uintptr_t)arg);
-          DEBUGASSERT(ptr != NULL);
 
           *ptr = dev->power;
           break;
         }
 
       /* TODO: Integration with new common IOCTL API */
+
+      /* Set modulation */
+
+      case WLIOC_SETMODU:
+        {
+          enum wlioc_modulation_e modu =
+            *(FAR enum wlioc_modulation_e *)((uintptr_t)arg);
+          ret = sx126x_ioctl_setmodu(dev, modu);
+          break;
+        }
+
+      /* Set bandwidth */
+
+      case WLIOC_LORA_SETBW:
+        {
+          ret = sx126x_ioctl_setbw(dev, *(FAR uint32_t *)((uintptr_t)arg));
+          break;
+        }
+
+      case WLIOC_LORA_SETCR:
+        {
+          FAR enum wlioc_lora_cr_e *cr =
+            (FAR enum wlioc_lora_cr_e *)((uintptr_t)arg);
+          ret = sx126x_ioctl_setcr(dev, *cr);
+          break;
+        }
+
+      case WLIOC_LORA_SETCRC:
+        {
+          FAR uint8_t *crc_en = (FAR uint8_t *)((uintptr_t)arg);
+          dev->lora_crc = *crc_en;
+          break;
+        }
+
+      case WLIOC_LORA_SETFIXEDHDR:
+        {
+          FAR uint8_t *hdr = (FAR uint8_t *)((uintptr_t)arg);
+          dev->lora_fixed_header = *hdr;
+          break;
+        }  
+
+      case WLIOC_LORA_SETSYNCWORD:
+        {
+          FAR struct wlioc_lora_syncword_s *sync =
+            (FAR struct wlioc_lora_syncword_s *)((uintptr_t)arg);
+          sx126x_set_syncword(dev, sync->syncword, sync->syncword_length);
+          break;
+        }
+
+      /* This driver does not support fine power but apply it anyway */
+
+      case WLIOC_SETFINEPOWER:
+        {
+          FAR uint32_t *fpwr = (FAR uint32_t *)((uintptr_t)arg);
+          dev->power = (*fpwr)/100;
+          break;
+        }
+
+      /* Addressing is not supported */
+
+      case WLIOC_SETADDR:
+        {
+          ret = -ENOTSUP;
+          break;
+        }
 
       /* Driver specific IOCTL */
 
@@ -577,7 +796,6 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         {
           FAR struct sx126x_lora_config_s *ptr =
             (FAR struct sx126x_lora_config_s *)((uintptr_t)arg);
-          DEBUGASSERT(ptr != NULL);
 
           /* Modulation params */
 
@@ -598,11 +816,13 @@ static int sx126x_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
           break;
         }
+
+      default:
+        {
+          ret = -ENOTTY;
+          break;
+        }
     }
-
-  /* Success */
-
-  ret = OK;
 
 exit_err:
   nxmutex_unlock(&dev->lock);
@@ -1149,7 +1369,7 @@ static void sx126x_set_syncword(FAR struct sx126x_dev_s *dev,
   if (syncword_length > SX126X_REG_SYNCWORD_LEN)
     {
       syncword_length = SX126X_REG_SYNCWORD_LEN;
-      wlerr("Syncword length was limited to the maximum 8 bytes");
+      wlwarn("Syncword length was limited to the maximum 8 bytes");
     }
 
   sx126x_write_register(dev, SX126X_REG_SYNCWORD, syncword, syncword_length);
